@@ -120,6 +120,14 @@ export class UsersController {
   }
 
   // Admin endpoints
+  @Post('users')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create user (Admin)' })
+  async createUser(@Body() dto: any) {
+    return this.usersService.createUser(dto);
+  }
+
   @Get('users')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()

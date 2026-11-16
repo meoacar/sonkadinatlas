@@ -229,7 +229,7 @@ export default function HomeScreen() {
               longest={snapshot.streak.longest}
               cycleDay={snapshot.todaySnapshot?.cycleDay}
               onPress={() => {
-                // Show streak details modal
+                router.push('/gamification');
               }}
             />
           </View>

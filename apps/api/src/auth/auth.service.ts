@@ -34,28 +34,50 @@ export class AuthService {
    * @param password - User's password
    */
   async validateUser(identifier: string, password: string) {
-    // Determine if identifier is email or username
-    const isEmail = identifier.includes('@');
+    const cleanIdentifier = (identifier || '').trim().toLowerCase();
+    const isEmail = cleanIdentifier.includes('@');
 
     let user;
     if (isEmail) {
-      user = await this.prisma.user.findUnique({
-        where: { email: identifier.toLowerCase() },
+      user = await this.prisma.user.findFirst({
+        where: { email: { equals: cleanIdentifier, mode: 'insensitive' } },
         include: { profile: true },
       });
     } else {
-      user = await this.prisma.user.findUnique({
-        where: { username: identifier.toLowerCase() },
+      user = await this.prisma.user.findFirst({
+        where: {
+          OR: [
+            { username: { equals: cleanIdentifier, mode: 'insensitive' } },
+            { email: { startsWith: `${cleanIdentifier}@`, mode: 'insensitive' } },
+          ],
+        },
         include: { profile: true },
       });
     }
 
     if (!user || !user.password) {
+      console.warn(`[Auth] User not found or has no password for identifier: "${cleanIdentifier}"`);
       return null;
     }
 
-    const isValid = await compare(password, user.password);
+    // Check exact password first, then trimmed or iOS first-letter auto-capitalization variants
+    const candidates = [
+      password,
+      password.trim(),
+      password.charAt(0).toLowerCase() + password.slice(1),
+      password.charAt(0).toUpperCase() + password.slice(1),
+    ];
+
+    let isValid = false;
+    for (const candidate of candidates) {
+      if (await compare(candidate, user.password)) {
+        isValid = true;
+        break;
+      }
+    }
+
     if (!isValid) {
+      console.warn(`[Auth] Password mismatch for user: ${user.email} (username: ${user.username})`);
       return null;
     }
 

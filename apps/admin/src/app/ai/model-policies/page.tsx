@@ -15,7 +15,7 @@ const providerInfo = {
 export default function ModelPoliciesList() {
     const router = useRouter();
     const { tableProps } = useTable({
-        resource: 'model-policies',
+        resource: 'ai/model-policies',
         syncWithLocation: true,
     });
 
@@ -26,12 +26,12 @@ export default function ModelPoliciesList() {
             key: 'plan',
             render: (plan: string) => (
                 <Tag color={plan === 'premium' ? 'gold' : 'default'}>
-                    {plan.toUpperCase()}
+                    {plan === 'premium' ? 'PREMIUM' : 'ÜCRETSİZ'}
                 </Tag>
             ),
         },
         {
-            title: 'Provider',
+            title: 'Sağlayıcı',
             dataIndex: 'provider',
             key: 'provider',
             render: (provider: keyof typeof providerInfo) => {
@@ -47,23 +47,23 @@ export default function ModelPoliciesList() {
             },
         },
         {
-            title: 'Model Name',
+            title: 'Model Adı',
             dataIndex: 'modelName',
             key: 'modelName',
             render: (text: string) => <Tag color="blue">{text}</Tag>,
         },
         {
-            title: 'Temperature',
+            title: 'Sıcaklık (Temp)',
             dataIndex: 'temperature',
             key: 'temperature',
         },
         {
-            title: 'Max Tokens',
+            title: 'Maks. Token',
             dataIndex: 'maxTokens',
             key: 'maxTokens',
         },
         {
-            title: 'Actions',
+            title: 'İşlemler',
             key: 'actions',
             render: (_: any, record: any) => (
                 <Space>
@@ -76,7 +76,7 @@ export default function ModelPoliciesList() {
 
     return (
         <List
-            title="Model Policies"
+            title="Model Politikaları"
             headerButtons={
                 <CreateButton onClick={() => router.push('/ai/model-policies/create')} />
             }

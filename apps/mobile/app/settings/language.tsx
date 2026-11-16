@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     View,
     Text,
@@ -9,7 +9,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import { useTheme } from '@/hooks/useTheme';
+import { api } from '@/services/api';
 
 type Language = {
     code: string;
@@ -32,21 +34,39 @@ export default function LanguageSettingsScreen() {
     const theme = useTheme();
     const [selectedLanguage, setSelectedLanguage] = useState('tr');
 
+    useEffect(() => {
+        SecureStore.getItemAsync('appLanguage')
+            .then((saved) => {
+                if (saved) setSelectedLanguage(saved);
+            })
+            .catch(() => {});
+    }, []);
+
     const handleSelectLanguage = (languageCode: string) => {
         Alert.alert(
             'Dil Değiştir',
-            'Dil değişikliği için uygulama yeniden başlatılacak. Devam etmek istiyor musunuz?',
+            'Dil değişikliği kaydedilecek. Devam etmek istiyor musunuz?',
             [
                 { text: 'İptal', style: 'cancel' },
                 {
                     text: 'Değiştir',
-                    onPress: () => {
+                    onPress: async () => {
                         setSelectedLanguage(languageCode);
-                        // TODO: Implement language change logic
-                        Alert.alert('Başarılı', 'Dil değiştirildi. Uygulama yeniden başlatılıyor...');
+                        try {
+                            await SecureStore.setItemAsync('appLanguage', languageCode);
+                            const meResponse = await api.get<any>('/me').catch(() => null);
+                            const currentPrefs = meResponse?.profile?.preferencesJson || {};
+                            await api.patch('/me', {
+                                preferencesJson: {
+                                    ...currentPrefs,
+                                    language: languageCode,
+                                },
+                            }).catch(() => {});
+                        } catch {}
+                        Alert.alert('Başarılı', 'Dil tercihiniz kaydedildi.');
                         setTimeout(() => {
                             router.back();
-                        }, 1500);
+                        }, 800);
                     },
                 },
             ]

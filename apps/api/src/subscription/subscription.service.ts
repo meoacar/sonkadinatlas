@@ -403,8 +403,9 @@ export class SubscriptionService {
                 validatedData = await this.receiptValidator.validateAppleReceipt(receipt);
             } else if (provider === PaymentProvider.GOOGLE) {
                 // For Google, productId is the subscription ID and transactionId is the purchase token
+                const packageName = process.env.GOOGLE_PLAY_PACKAGE_NAME || 'com.wellness.companion';
                 validatedData = await this.receiptValidator.validateGoogleReceipt(
-                    'com.wellness.companion', // TODO: Get from config
+                    packageName,
                     productId,
                     transactionId,
                 );
@@ -471,14 +472,18 @@ export class SubscriptionService {
         }
 
         // Create transaction record
+        const yearlyPrice = Number(process.env.SUBSCRIPTION_YEARLY_PRICE || 999);
+        const monthlyPrice = Number(process.env.SUBSCRIPTION_MONTHLY_PRICE || 99);
+        const transactionAmount = tier === SubscriptionTier.YEARLY ? yearlyPrice : monthlyPrice;
+
         await this.prisma.subscriptionTransaction.create({
             data: {
                 subscriptionId: subscription.id,
                 transactionId,
                 originalTransactionId: transactionId,
                 productId,
-                amount: tier === SubscriptionTier.YEARLY ? 999 : 99, // TODO: Get from config
-                currency: 'TRY',
+                amount: transactionAmount,
+                currency: process.env.SUBSCRIPTION_CURRENCY || 'TRY',
                 status: TransactionStatus.COMPLETED,
                 type: TransactionType.INITIAL_PURCHASE,
                 provider,

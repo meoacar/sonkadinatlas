@@ -18,7 +18,7 @@ interface ArticleCardProps {
     };
     onPress: () => void;
     onSave: () => void;
-    variant?: 'horizontal' | 'vertical' | 'grid';
+    variant?: 'horizontal' | 'vertical' | 'grid' | 'featured';
 }
 
 export const ArticleCard = memo(function ArticleCard({
@@ -38,77 +38,177 @@ export const ArticleCard = memo(function ArticleCard({
     // Kategori bazlı gradient renkleri
     const getCategoryGradient = () => {
         const category = article.category.toLowerCase();
-        if (category.includes('regl') || category.includes('adet')) {
+        if (category.includes('regl') || category.includes('adet') || category.includes('menstrual') || category.includes('pms')) {
             return ['#FF6B9D', '#C44569'] as const;
         }
-        if (category.includes('hamile') || category.includes('gebelik')) {
-            return ['#A8E6CF', '#56AB91'] as const;
+        if (category.includes('hamile') || category.includes('gebelik') || category.includes('pregnancy')) {
+            return ['#E879F9', '#A855F7'] as const;
         }
-        if (category.includes('beslenme') || category.includes('diyet')) {
-            return ['#FFB84D', '#FF8C42'] as const;
+        if (category.includes('fertility') || category.includes('doğurgan')) {
+            return ['#F472B6', '#DB2777'] as const;
         }
-        if (category.includes('egzersiz') || category.includes('spor')) {
-            return ['#FF6B35', '#FF8C42'] as const;
+        if (category.includes('beslenme') || category.includes('diyet') || category.includes('nutrition')) {
+            return ['#34D399', '#059669'] as const;
         }
-        if (category.includes('ruh') || category.includes('mental')) {
+        if (category.includes('egzersiz') || category.includes('spor') || category.includes('exercise')) {
+            return ['#60A5FA', '#2563EB'] as const;
+        }
+        if (category.includes('ruh') || category.includes('mental') || category.includes('sleep')) {
             return ['#A78BFA', '#7C3AED'] as const;
         }
-        return ['#6C63FF', '#8B7FFF'] as const; // default
+        return ['#EC4899', '#8B5CF6'] as const; // default
     };
 
     const gradientColors = getCategoryGradient();
+
+    if (variant === 'featured') {
+        const featuredSource = article.imageUrl || article.thumbnailUrl;
+        return (
+            <TouchableOpacity
+                style={styles.featuredContainer}
+                onPress={onPress}
+                activeOpacity={0.9}
+            >
+                <View style={styles.featuredMedia}>
+                    {featuredSource && !imageError ? (
+                        <>
+                            {!imageLoaded && (
+                                <View style={[styles.featuredImage, styles.imagePlaceholder]} />
+                            )}
+                            <Image
+                                source={{ uri: featuredSource }}
+                                style={[styles.featuredImage, !imageLoaded && styles.imageHidden]}
+                                resizeMode="cover"
+                                onLoad={() => setImageLoaded(true)}
+                                onError={() => setImageError(true)}
+                                fadeDuration={200}
+                                progressiveRenderingEnabled={true}
+                            />
+                            <LinearGradient
+                                colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.45)']}
+                                style={styles.featuredScrim}
+                            />
+                        </>
+                    ) : (
+                        <LinearGradient
+                            colors={gradientColors}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.featuredFallback}
+                        >
+                            <Ionicons name="sparkles" size={36} color="rgba(255,255,255,0.85)" />
+                        </LinearGradient>
+                    )}
+
+                    <View style={styles.featuredTopRow}>
+                        <CategoryBadge category={article.category} size="small" />
+                        <TouchableOpacity
+                            style={styles.featuredSaveButton}
+                            onPress={(e) => {
+                                e.stopPropagation();
+                                onSave();
+                            }}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
+                            <Ionicons
+                                name={article.isSaved ? 'heart' : 'heart-outline'}
+                                size={18}
+                                color={article.isSaved ? '#FF4D6D' : '#FFFFFF'}
+                            />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+
+                <View style={styles.featuredContent}>
+                    <Text style={styles.featuredTitle} numberOfLines={2}>
+                        {article.title}
+                    </Text>
+                    {!!article.excerpt && (
+                        <Text style={styles.featuredExcerpt} numberOfLines={2}>
+                            {article.excerpt}
+                        </Text>
+                    )}
+                    <View style={styles.featuredFooter}>
+                        <View style={styles.readTimeRow}>
+                            <Ionicons name="time-outline" size={14} color={theme.colors.textLight} />
+                            <Text style={styles.readTime}>{article.readTimeMin} dk okuma</Text>
+                        </View>
+                        <View style={styles.readMoreRow}>
+                            <Text style={styles.readMoreText}>Oku</Text>
+                            <Ionicons name="arrow-forward" size={14} color={theme.colors.primary} />
+                        </View>
+                    </View>
+                </View>
+            </TouchableOpacity>
+        );
+    }
 
     if (variant === 'horizontal') {
         return (
             <TouchableOpacity
                 style={styles.horizontalContainer}
                 onPress={onPress}
-                activeOpacity={0.7}
+                activeOpacity={0.8}
             >
-                {imageSource && !imageError && (
-                    <View style={styles.imageContainer}>
-                        {!imageLoaded && (
-                            <View style={[styles.horizontalImage, styles.imagePlaceholder]} />
-                        )}
-                        <Image
-                            source={{ uri: imageSource }}
-                            style={[styles.horizontalImage, !imageLoaded && styles.imageHidden]}
-                            resizeMode="cover"
-                            onLoad={() => setImageLoaded(true)}
-                            onError={() => setImageError(true)}
-                            // Performance optimizations
-                            fadeDuration={200}
-                            progressiveRenderingEnabled={true}
-                            defaultSource={undefined}
-                        />
-                    </View>
-                )}
+                <View style={styles.horizontalMedia}>
+                    {imageSource && !imageError ? (
+                        <>
+                            {!imageLoaded && (
+                                <View style={[styles.horizontalImage, styles.imagePlaceholder]} />
+                            )}
+                            <Image
+                                source={{ uri: imageSource }}
+                                style={[styles.horizontalImage, !imageLoaded && styles.imageHidden]}
+                                resizeMode="cover"
+                                onLoad={() => setImageLoaded(true)}
+                                onError={() => setImageError(true)}
+                                fadeDuration={200}
+                                progressiveRenderingEnabled={true}
+                                defaultSource={undefined}
+                            />
+                        </>
+                    ) : (
+                        <LinearGradient
+                            colors={gradientColors}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.horizontalFallback}
+                        >
+                            <Ionicons name="book-outline" size={26} color="rgba(255,255,255,0.9)" />
+                        </LinearGradient>
+                    )}
+                </View>
+
                 <View style={styles.horizontalContent}>
                     <View style={styles.horizontalHeader}>
                         <CategoryBadge category={article.category} size="small" />
-                        <Text style={styles.readTime}>{article.readTimeMin} dk</Text>
+                        <TouchableOpacity
+                            style={styles.horizontalSaveButton}
+                            onPress={(e) => {
+                                e.stopPropagation();
+                                onSave();
+                            }}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
+                            <Ionicons
+                                name={article.isSaved ? 'heart' : 'heart-outline'}
+                                size={18}
+                                color={article.isSaved ? theme.colors.error : theme.colors.textLight}
+                            />
+                        </TouchableOpacity>
                     </View>
+
                     <Text style={styles.horizontalTitle} numberOfLines={2}>
                         {article.title}
                     </Text>
-                    <Text style={styles.horizontalExcerpt} numberOfLines={2}>
-                        {article.excerpt}
-                    </Text>
+
+                    <View style={styles.horizontalFooter}>
+                        <View style={styles.readTimeRow}>
+                            <Ionicons name="time-outline" size={13} color={theme.colors.textLight} />
+                            <Text style={styles.readTime}>{article.readTimeMin} dk okuma</Text>
+                        </View>
+                    </View>
                 </View>
-                <TouchableOpacity
-                    style={styles.saveButton}
-                    onPress={(e) => {
-                        e.stopPropagation();
-                        onSave();
-                    }}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                    <Ionicons
-                        name={article.isSaved ? 'heart' : 'heart-outline'}
-                        size={20}
-                        color={article.isSaved ? theme.colors.error : theme.colors.textSecondary}
-                    />
-                </TouchableOpacity>
             </TouchableOpacity>
         );
     }
@@ -232,8 +332,95 @@ export const ArticleCard = memo(function ArticleCard({
     );
 });
 
-const createStyles = (theme: ReturnType<typeof useTheme>, variant: 'horizontal' | 'vertical' | 'grid') =>
+const createStyles = (theme: ReturnType<typeof useTheme>, variant: 'horizontal' | 'vertical' | 'grid' | 'featured') =>
     StyleSheet.create({
+        // Featured variant styles
+        featuredContainer: {
+            backgroundColor: theme.colors.backgroundCard,
+            borderRadius: 20,
+            overflow: 'hidden',
+            marginBottom: 16,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            shadowColor: theme.colors.shadow,
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.06,
+            shadowRadius: 12,
+            elevation: 3,
+        },
+        featuredMedia: {
+            position: 'relative',
+            width: '100%',
+            height: 184,
+            backgroundColor: theme.colors.border,
+        },
+        featuredImage: {
+            width: '100%',
+            height: '100%',
+        },
+        featuredScrim: {
+            ...StyleSheet.absoluteFillObject,
+        },
+        featuredFallback: {
+            width: '100%',
+            height: '100%',
+            justifyContent: 'center',
+            alignItems: 'center',
+        },
+        featuredTopRow: {
+            position: 'absolute',
+            top: 12,
+            left: 12,
+            right: 12,
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+        },
+        featuredSaveButton: {
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            backgroundColor: 'rgba(0, 0, 0, 0.42)',
+            justifyContent: 'center',
+            alignItems: 'center',
+        },
+        featuredContent: {
+            padding: 16,
+        },
+        featuredTitle: {
+            fontSize: 18,
+            fontWeight: '700',
+            color: theme.colors.text,
+            lineHeight: 24,
+            marginBottom: 6,
+        },
+        featuredExcerpt: {
+            fontSize: 13.5,
+            color: theme.colors.textSecondary,
+            lineHeight: 19,
+            marginBottom: 12,
+        },
+        featuredFooter: {
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+        },
+        readTimeRow: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 4,
+        },
+        readMoreRow: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 4,
+        },
+        readMoreText: {
+            fontSize: 13,
+            fontWeight: '600',
+            color: theme.colors.primary,
+        },
+
         // Grid variant styles - Pinterest/Instagram style
         gridContainer: {
             backgroundColor: theme.colors.backgroundCard,
@@ -377,62 +564,64 @@ const createStyles = (theme: ReturnType<typeof useTheme>, variant: 'horizontal' 
         // Horizontal variant styles
         horizontalContainer: {
             backgroundColor: theme.colors.backgroundCard,
-            borderRadius: 20,
+            borderRadius: 16,
             overflow: 'hidden',
             flexDirection: 'row',
-            marginBottom: theme.spacing.lg,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.08,
-            shadowRadius: 12,
-            elevation: 4,
-            position: 'relative',
-            minHeight: 140,
+            alignItems: 'center',
+            padding: 12,
+            marginBottom: 12,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            shadowColor: theme.colors.shadow,
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.04,
+            shadowRadius: 8,
+            elevation: 2,
+            gap: 12,
+        },
+        horizontalMedia: {
+            width: 96,
+            height: 96,
+            borderRadius: 12,
+            overflow: 'hidden',
+            backgroundColor: theme.colors.border,
         },
         horizontalImage: {
-            width: 140,
-            height: 140,
+            width: '100%',
+            height: '100%',
             backgroundColor: theme.colors.border,
+        },
+        horizontalFallback: {
+            width: '100%',
+            height: '100%',
+            justifyContent: 'center',
+            alignItems: 'center',
         },
         horizontalContent: {
             flex: 1,
-            padding: theme.spacing.lg,
-            paddingRight: 48,
+            minHeight: 92,
             justifyContent: 'space-between',
         },
         horizontalHeader: {
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
-            marginBottom: theme.spacing.sm,
+            marginBottom: 4,
         },
         horizontalTitle: {
-            fontSize: 17,
-            fontWeight: '800',
+            fontSize: 15,
+            fontWeight: '700',
             color: theme.colors.text,
-            marginBottom: theme.spacing.sm,
-            lineHeight: 24,
-        },
-        horizontalExcerpt: {
-            fontSize: 14,
-            color: theme.colors.textSecondary,
             lineHeight: 20,
+            marginBottom: 6,
         },
-        saveButton: {
-            position: 'absolute',
-            top: theme.spacing.lg,
-            right: theme.spacing.lg,
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-            backgroundColor: 'rgba(255, 255, 255, 0.95)',
-            justifyContent: 'center',
+        horizontalFooter: {
+            flexDirection: 'row',
             alignItems: 'center',
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.15,
-            shadowRadius: 8,
-            elevation: 4,
+            justifyContent: 'space-between',
+        },
+        horizontalSaveButton: {
+            padding: 4,
         },
 
         // Common styles

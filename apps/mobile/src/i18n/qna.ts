@@ -54,7 +54,7 @@ export function getCategoryTranslation(
     category: QuestionCategory,
     language: Language = 'tr'
 ): string {
-    const t = language === 'tr' ? translations.tr : translations.tr; // TODO: Add en translations
+    const t = language === 'tr' ? translations.tr : translations.en;
     return t.qna.categories[category] || category;
 }
 

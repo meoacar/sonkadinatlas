@@ -48,8 +48,11 @@ export const WellnessTile: React.FC<WellnessTileProps> = ({
       </View>
 
       {isEmpty ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>{emptyState}</Text>
+        <View style={styles.content}>
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>{emptyState}</Text>
+          </View>
+          {actions && <View style={styles.actions}>{actions}</View>}
         </View>
       ) : (
         <View style={styles.content}>

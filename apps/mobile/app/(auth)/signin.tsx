@@ -83,6 +83,7 @@ export default function SignInScreen() {
                 value={identifier}
                 onChangeText={setIdentifier}
                 autoCapitalize="none"
+                autoCorrect={false}
                 editable={!loading}
               />
 
@@ -94,6 +95,8 @@ export default function SignInScreen() {
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
                   editable={!loading}
                 />
                 <TouchableOpacity

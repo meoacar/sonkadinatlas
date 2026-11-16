@@ -93,9 +93,18 @@ export class CyclesService {
   /**
    * Get user's cycle history
    */
-  async getCycles(userId: string, limit = 12) {
+  async getCycles(userId: string, limit = 12, isAdmin = false) {
     return this.prisma.periodCycle.findMany({
-      where: { userId },
+      where: isAdmin ? {} : { userId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+          },
+        },
+      },
       orderBy: { startDate: 'desc' },
       take: limit,
     });
@@ -104,11 +113,17 @@ export class CyclesService {
   /**
    * Get specific cycle
    */
-  async getCycle(userId: string, cycleId: string) {
+  async getCycle(userId: string, cycleId: string, isAdmin = false) {
     return this.prisma.periodCycle.findFirst({
-      where: {
-        id: cycleId,
-        userId,
+      where: isAdmin ? { id: cycleId } : { id: cycleId, userId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+          },
+        },
       },
     });
   }

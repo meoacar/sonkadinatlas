@@ -7,35 +7,35 @@ import dayjs from 'dayjs';
 
 export default function FeatureFlagsList() {
     const { tableProps } = useTable({
-        resource: 'feature-flags',
+        resource: 'system/feature-flags',
         syncWithLocation: true,
     });
 
     const columns = [
         {
-            title: 'Key',
+            title: 'Anahtar (Key)',
             dataIndex: 'key',
             key: 'key',
         },
         {
-            title: 'Value',
+            title: 'Değer',
             dataIndex: 'valueJson',
             key: 'valueJson',
             render: (value: any) => {
                 if (typeof value === 'boolean') {
-                    return <Tag color={value ? 'green' : 'red'}>{value ? 'Enabled' : 'Disabled'}</Tag>;
+                    return <Tag color={value ? 'green' : 'red'}>{value ? 'Aktif' : 'Pasif'}</Tag>;
                 }
                 return <code>{JSON.stringify(value)}</code>;
             },
         },
         {
-            title: 'Updated',
+            title: 'Son Güncelleme',
             dataIndex: 'updatedAt',
             key: 'updatedAt',
             render: (date: string) => dayjs(date).format('YYYY-MM-DD HH:mm'),
         },
         {
-            title: 'Actions',
+            title: 'İşlemler',
             key: 'actions',
             render: (_: any, record: any) => (
                 <Space>
@@ -46,7 +46,7 @@ export default function FeatureFlagsList() {
     ];
 
     return (
-        <List>
+        <List title="Özellik Bayrakları">
             <Table {...tableProps} columns={columns} rowKey="key" />
         </List>
     );

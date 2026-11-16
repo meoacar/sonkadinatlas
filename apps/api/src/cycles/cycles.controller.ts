@@ -48,6 +48,7 @@ export class CyclesController {
     return this.cyclesService.getCycles(
       user.id,
       limit ? parseInt(limit) : undefined,
+      user.isAdmin,
     );
   }
 
@@ -76,7 +77,7 @@ export class CyclesController {
 
   @Get(':id')
   async getCycle(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.cyclesService.getCycle(user.id, id);
+    return this.cyclesService.getCycle(user.id, id, user.isAdmin);
   }
 
   @Patch(':id')

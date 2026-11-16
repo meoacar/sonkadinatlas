@@ -1,487 +1,467 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, FlatList, RefreshControl } from 'react-native';
+import { useState, useCallback } from 'react';
+import {
+    View,
+    Text,
+    StyleSheet,
+    FlatList,
+    ScrollView,
+    TouchableOpacity,
+    ActivityIndicator,
+    RefreshControl,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { useState, useCallback, useMemo } from 'react';
 import { useTheme } from '@/hooks/useTheme';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import {
+    useInfiniteArticles,
+    useSavedArticles,
+    useToggleSave,
+} from '@/hooks/useDiscover';
+import { ArticleCardDto } from '@/services/api';
 import { ArticleCard } from '@/components/discover/ArticleCard';
 import { SearchBar } from '@/components/discover/SearchBar';
-import { useInfiniteArticles, useSavedArticles, useToggleSave } from '@/hooks/useDiscover';
 
 const CATEGORIES = [
-    { id: 'all', label: '✨ Tümü', emoji: '✨' },
-    { id: 'pregnancy', label: '🤰 Hamilelik', emoji: '🤰' },
-    { id: 'menstrual_health', label: '🩸 Regl', emoji: '🩸' },
-    { id: 'fertility', label: '💕 Doğurganlık', emoji: '💕' },
-    { id: 'nutrition', label: '🥗 Beslenme', emoji: '🥗' },
-    { id: 'exercise', label: '💪 Egzersiz', emoji: '💪' },
+    { id: 'all', label: 'Tümü', icon: 'sparkles-outline' as const },
+    { id: 'menstrual_health', label: 'Regl', icon: 'water-outline' as const },
+    { id: 'pregnancy', label: 'Hamilelik', icon: 'heart-outline' as const },
+    { id: 'fertility', label: 'Doğurganlık', icon: 'flower-outline' as const },
+    { id: 'nutrition', label: 'Beslenme', icon: 'nutrition-outline' as const },
+    { id: 'exercise', label: 'Egzersiz', icon: 'fitness-outline' as const },
+    { id: 'mental_health', label: 'Mental', icon: 'leaf-outline' as const },
+    { id: 'sleep', label: 'Uyku', icon: 'moon-outline' as const },
 ];
 
 export default function DiscoverScreen() {
     const theme = useTheme();
     const router = useRouter();
-    const [activeTab, setActiveTab] = useState<'all' | 'saved'>('all');
-    const [selectedCategory, setSelectedCategory] = useState<string>('all');
-    const [searchQuery, setSearchQuery] = useState('');
-
     const styles = createStyles(theme);
 
-    // Fetch all articles with infinite scroll
+    const [activeTab, setActiveTab] = useState<'all' | 'saved'>('all');
+    const [selectedCategory, setSelectedCategory] = useState<string>('all');
+    const [search, setSearch] = useState<string>('');
+    const [refreshing, setRefreshing] = useState(false);
+
     const {
-        data: articlesData,
-        isLoading: isLoadingArticles,
-        isError: isErrorArticles,
-        error: errorArticles,
-        refetch: refetchArticles,
-        fetchNextPage,
-        hasNextPage,
+        data: infiniteData,
+        isLoading: articlesLoading,
         isFetchingNextPage,
-    } = useInfiniteArticles(
-        {
-            category: selectedCategory === 'all' ? undefined : selectedCategory,
-            search: searchQuery || undefined,
-            locale: 'tr',
-            limit: 20,
-        },
-        {
-            enabled: activeTab === 'all',
-            retry: 2, // Retry failed requests twice
-            retryDelay: (attemptIndex: number) => Math.min(1000 * 2 ** attemptIndex, 30000),
-        }
-    );
-
-    // Flatten paginated data
-    const allArticles = useMemo(() => {
-        return articlesData?.pages.flatMap((page: any) => page.articles) || [];
-    }, [articlesData]);
-
-    // Fetch saved articles
-    const {
-        data: savedArticles,
-        isLoading: isLoadingSaved,
-        isError: isErrorSaved,
-        error: errorSaved,
-        refetch: refetchSaved,
-    } = useSavedArticles('tr', {
-        enabled: activeTab === 'saved',
-        retry: 2,
-        retryDelay: (attemptIndex: number) => Math.min(1000 * 2 ** attemptIndex, 30000),
+        hasNextPage,
+        fetchNextPage,
+        refetch: refetchArticles,
+    } = useInfiniteArticles({
+        category: selectedCategory === 'all' ? undefined : selectedCategory,
+        search: search || undefined,
     });
 
-    // Toggle save mutation
+    const {
+        data: savedData,
+        isLoading: savedLoading,
+        refetch: refetchSaved,
+    } = useSavedArticles();
+
     const toggleSaveMutation = useToggleSave();
 
-    const articles = activeTab === 'all' ? allArticles : savedArticles;
-    const isLoading = activeTab === 'all' ? isLoadingArticles : isLoadingSaved;
-    const isError = activeTab === 'all' ? isErrorArticles : isErrorSaved;
-    const error = activeTab === 'all' ? errorArticles : errorSaved;
+    const articles = infiniteData?.pages.flatMap((page) => page.articles || []) || [];
+    const savedArticles = savedData || [];
+    const displayedArticles = activeTab === 'all' ? articles : savedArticles;
+    const isLoading = activeTab === 'all' ? articlesLoading : savedLoading;
 
-    // Handlers
-    const handleCategoryChange = useCallback((category: string) => {
-        setSelectedCategory(category);
-    }, []);
-
-    const handleSearchChange = useCallback((query: string) => {
-        setSearchQuery(query);
-    }, []);
-
-    const handleTabChange = useCallback((tab: 'all' | 'saved') => {
-        setActiveTab(tab);
-    }, []);
-
-    // Load more articles (infinite scroll)
-    const handleLoadMore = useCallback(() => {
-        if (hasNextPage && !isFetchingNextPage && activeTab === 'all') {
-            fetchNextPage();
-        }
-    }, [hasNextPage, isFetchingNextPage, activeTab, fetchNextPage]);
-
-    // Pull to refresh
-    const handleRefresh = useCallback(() => {
-        if (activeTab === 'all') {
-            refetchArticles();
-        } else {
-            refetchSaved();
-        }
+    const handleRefresh = useCallback(async () => {
+        setRefreshing(true);
+        await (activeTab === 'all' ? refetchArticles() : refetchSaved());
+        setRefreshing(false);
     }, [activeTab, refetchArticles, refetchSaved]);
 
+    const handleLoadMore = useCallback(() => {
+        if (activeTab === 'all' && hasNextPage && !isFetchingNextPage) {
+            fetchNextPage();
+        }
+    }, [activeTab, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+    const handleArticlePress = useCallback(
+        (articleId: string) => {
+            router.push(`/discover/article/${articleId}`);
+        },
+        [router]
+    );
+
+    const handleSaveToggle = useCallback(
+        (article: ArticleCardDto) => {
+            toggleSaveMutation.mutate(article.id);
+        },
+        [toggleSaveMutation]
+    );
+
+    const showFeatured = activeTab === 'all' && !search.trim() && displayedArticles.length > 0;
+
+    const renderArticleItem = useCallback(
+        ({ item, index }: { item: ArticleCardDto; index: number }) => (
+            <ArticleCard
+                article={item}
+                variant={showFeatured && index === 0 ? 'featured' : 'horizontal'}
+                onPress={() => handleArticlePress(item.id)}
+                onSave={() => handleSaveToggle(item)}
+            />
+        ),
+        [showFeatured, handleArticlePress, handleSaveToggle]
+    );
+
+    const renderFooter = () => {
+        if (!isFetchingNextPage) return null;
+        return (
+            <View style={styles.footerLoader}>
+                <ActivityIndicator size="small" color={theme.colors.primary} />
+            </View>
+        );
+    };
+
+    const renderEmpty = () => {
+        if (isLoading) return null;
+
+        return (
+            <View style={styles.emptyContainer}>
+                <View style={styles.emptyIconBox}>
+                    <Ionicons
+                        name={activeTab === 'saved' ? 'bookmark-outline' : 'search-outline'}
+                        size={32}
+                        color={theme.colors.primary}
+                    />
+                </View>
+                <Text style={styles.emptyTitle}>
+                    {activeTab === 'saved'
+                        ? 'Henüz kaydedilen makale yok'
+                        : search
+                          ? 'Sonuç bulunamadı'
+                          : 'Bu kategoride makale yok'}
+                </Text>
+                <Text style={styles.emptyDescription}>
+                    {activeTab === 'saved'
+                        ? 'Beğendiğin rehberleri kalp ikonuna dokunarak burada saklayabilirsin.'
+                        : search
+                          ? 'Farklı bir anahtar kelime veya kategori deneyebilirsin.'
+                          : 'Yakında bu konuda yeni içerikler eklenecek.'}
+                </Text>
+                {(search || selectedCategory !== 'all') && activeTab === 'all' && (
+                    <TouchableOpacity
+                        style={styles.resetButton}
+                        onPress={() => {
+                            setSearch('');
+                            setSelectedCategory('all');
+                        }}
+                    >
+                        <Text style={styles.resetButtonText}>Filtreleri Temizle</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+        );
+    };
+
     return (
-        <SafeAreaView style={styles.safeArea} edges={['top']}>
-            <View style={styles.container}>
-                {/* Modern Header with Gradient */}
-                <View style={styles.headerContainer}>
-                    <View style={styles.header}>
-                        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                            <Text style={styles.backIcon}>←</Text>
-                        </TouchableOpacity>
-                        <View style={styles.titleContainer}>
-                            <Text style={styles.title}>Keşfet</Text>
-                            <Text style={styles.subtitle}>Sağlık ve yaşam rehberleri</Text>
-                        </View>
-                        <View style={styles.headerSpacer} />
+        <SafeAreaView style={styles.container} edges={['top']}>
+            {/* Clean Compact Header */}
+            <View style={styles.header}>
+                <View style={styles.titleRow}>
+                    <View style={styles.titleLeft}>
+                        {router.canGoBack() && (
+                            <TouchableOpacity
+                                style={styles.backButton}
+                                onPress={() => router.back()}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                                <Ionicons name="chevron-back" size={22} color={theme.colors.text} />
+                            </TouchableOpacity>
+                        )}
+                        <Text style={styles.headerTitle}>Bilgiler</Text>
                     </View>
 
-                    {/* Search Bar */}
-                    <View style={styles.searchContainer}>
-                        <SearchBar value={searchQuery} onChange={handleSearchChange} />
-                    </View>
-
-                    {/* Tabs */}
-                    <View style={styles.tabs}>
+                    {/* Segmented Pill Toggle */}
+                    <View style={styles.segmentedControl}>
                         <TouchableOpacity
-                            style={[styles.tab, activeTab === 'all' && styles.tabActive]}
-                            onPress={() => handleTabChange('all')}
+                            style={[styles.segment, activeTab === 'all' && styles.segmentActive]}
+                            onPress={() => setActiveTab('all')}
+                            activeOpacity={0.8}
                         >
-                            <Text style={[styles.tabText, activeTab === 'all' && styles.tabTextActive]}>
-                                ✨ Tümü
+                            <Text
+                                style={[
+                                    styles.segmentText,
+                                    activeTab === 'all' && styles.segmentTextActive,
+                                ]}
+                            >
+                                Tümü
                             </Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                            style={[styles.tab, activeTab === 'saved' && styles.tabActive]}
-                            onPress={() => handleTabChange('saved')}
+                            style={[styles.segment, activeTab === 'saved' && styles.segmentActive]}
+                            onPress={() => setActiveTab('saved')}
+                            activeOpacity={0.8}
                         >
-                            <Text style={[styles.tabText, activeTab === 'saved' && styles.tabTextActive]}>
-                                ❤️ Kaydedilenler
+                            <Ionicons
+                                name={activeTab === 'saved' ? 'heart' : 'heart-outline'}
+                                size={13}
+                                color={
+                                    activeTab === 'saved'
+                                        ? '#FFFFFF'
+                                        : theme.colors.textSecondary
+                                }
+                            />
+                            <Text
+                                style={[
+                                    styles.segmentText,
+                                    activeTab === 'saved' && styles.segmentTextActive,
+                                ]}
+                            >
+                                Kayıtlı{savedArticles.length > 0 ? ` (${savedArticles.length})` : ''}
                             </Text>
                         </TouchableOpacity>
                     </View>
                 </View>
 
-                {/* Category Pills */}
                 {activeTab === 'all' && (
-                    <View style={styles.categoriesWrapper}>
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.categoriesContainer}
-                        >
-                            {CATEGORIES.map((category) => (
-                                <TouchableOpacity
-                                    key={category.id}
-                                    style={[
-                                        styles.categoryPill,
-                                        selectedCategory === category.id && styles.categoryPillActive,
-                                    ]}
-                                    onPress={() => handleCategoryChange(category.id)}
-                                    activeOpacity={0.7}
-                                >
-                                    <Text style={styles.categoryEmoji}>{category.emoji}</Text>
-                                    <Text
-                                        style={[
-                                            styles.categoryPillText,
-                                            selectedCategory === category.id && styles.categoryPillTextActive,
-                                        ]}
-                                    >
-                                        {category.label.replace(/^[^\s]+\s/, '')}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                    </View>
-                )}
-
-                {/* Articles List */}
-                {isError ? (
-                    <View style={styles.errorContainer}>
-                        <Text style={styles.errorIcon}>⚠️</Text>
-                        <Text style={styles.errorText}>
-                            Makaleler yüklenirken bir hata oluştu
-                        </Text>
-                        <Text style={styles.errorSubtext}>
-                            {error instanceof Error ? error.message : 'Lütfen tekrar deneyin'}
-                        </Text>
-                        <TouchableOpacity
-                            style={styles.retryButton}
-                            onPress={() => activeTab === 'all' ? refetchArticles() : refetchSaved()}
-                        >
-                            <Text style={styles.retryButtonText}>Tekrar Dene</Text>
-                        </TouchableOpacity>
-                    </View>
-                ) : (
-                    <FlatList
-                        data={articles || []}
-                        keyExtractor={(item) => item.id}
-                        numColumns={2}
-                        columnWrapperStyle={styles.gridRow}
-                        renderItem={({ item, index }) => (
-                            <View style={[styles.gridItem, index % 2 === 0 ? styles.gridItemLeft : styles.gridItemRight]}>
-                                <ArticleCard
-                                    article={item}
-                                    onPress={() => router.push(`/discover/article/${item.id}`)}
-                                    onSave={() => toggleSaveMutation.mutate(item.id)}
-                                    variant="grid"
-                                />
-                            </View>
-                        )}
-                        contentContainerStyle={styles.articlesContent}
-                        showsVerticalScrollIndicator={false}
-                        refreshControl={
-                            <RefreshControl
-                                refreshing={isLoading}
-                                onRefresh={handleRefresh}
-                                tintColor={theme.colors.primary}
-                                colors={[theme.colors.primary]}
-                            />
-                        }
-                        onEndReached={handleLoadMore}
-                        onEndReachedThreshold={0.5}
-                        ListEmptyComponent={
-                            isLoading ? (
-                                <View style={styles.loadingContainer}>
-                                    <ActivityIndicator size="large" color={theme.colors.primary} />
-                                    <Text style={styles.loadingText}>Makaleler yükleniyor...</Text>
-                                </View>
-                            ) : (
-                                <View style={styles.emptyContainer}>
-                                    <Text style={styles.emptyIcon}>📚</Text>
-                                    <Text style={styles.emptyText}>
-                                        {activeTab === 'saved'
-                                            ? 'Henüz kaydedilmiş makale yok'
-                                            : searchQuery
-                                                ? 'Arama sonucu bulunamadı'
-                                                : 'Makale bulunamadı'}
-                                    </Text>
-                                    {searchQuery && (
-                                        <Text style={styles.emptySubtext}>
-                                            Farklı bir arama terimi deneyin
-                                        </Text>
-                                    )}
-                                </View>
-                            )
-                        }
-                        ListFooterComponent={
-                            isFetchingNextPage && articles && articles.length > 0 ? (
-                                <View style={styles.footerLoader}>
-                                    <ActivityIndicator size="small" color={theme.colors.primary} />
-                                    <Text style={styles.footerLoaderText}>Daha fazla yükleniyor...</Text>
-                                </View>
-                            ) : null
-                        }
+                    <SearchBar
+                        value={search}
+                        onChange={setSearch}
+                        placeholder="Konu veya makale ara..."
                     />
                 )}
             </View>
+
+            {/* Compact Category Chips */}
+            {activeTab === 'all' && (
+                <View style={styles.categoriesContainer}>
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.categoriesScroll}
+                    >
+                        {CATEGORIES.map((category) => {
+                            const isSelected = selectedCategory === category.id;
+                            return (
+                                <TouchableOpacity
+                                    key={category.id}
+                                    style={[
+                                        styles.categoryChip,
+                                        isSelected && styles.categoryChipActive,
+                                    ]}
+                                    onPress={() => setSelectedCategory(category.id)}
+                                    activeOpacity={0.75}
+                                >
+                                    <Ionicons
+                                        name={category.icon}
+                                        size={14}
+                                        color={
+                                            isSelected ? '#FFFFFF' : theme.colors.textSecondary
+                                        }
+                                    />
+                                    <Text
+                                        style={[
+                                            styles.categoryChipText,
+                                            isSelected && styles.categoryChipTextActive,
+                                        ]}
+                                    >
+                                        {category.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
+                </View>
+            )}
+
+            {/* Articles Feed */}
+            {isLoading && displayedArticles.length === 0 ? (
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={theme.colors.primary} />
+                    <Text style={styles.loadingText}>İçerikler yükleniyor...</Text>
+                </View>
+            ) : (
+                <FlatList
+                    data={displayedArticles}
+                    renderItem={renderArticleItem}
+                    keyExtractor={(item) => item.id}
+                    contentContainerStyle={styles.listContent}
+                    showsVerticalScrollIndicator={false}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={handleRefresh}
+                            tintColor={theme.colors.primary}
+                        />
+                    }
+                    onEndReached={handleLoadMore}
+                    onEndReachedThreshold={0.4}
+                    ListFooterComponent={renderFooter}
+                    ListEmptyComponent={renderEmpty}
+                    removeClippedSubviews={true}
+                    maxToRenderPerBatch={10}
+                    windowSize={7}
+                    initialNumToRender={6}
+                />
+            )}
         </SafeAreaView>
     );
 }
 
 const createStyles = (theme: ReturnType<typeof useTheme>) =>
     StyleSheet.create({
-        safeArea: {
+        container: {
             flex: 1,
             backgroundColor: theme.colors.background,
         },
-        container: {
-            flex: 1,
-        },
-        headerContainer: {
-            backgroundColor: theme.colors.backgroundCard,
-            borderBottomLeftRadius: 24,
-            borderBottomRightRadius: 24,
-            paddingBottom: theme.spacing.md,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.05,
-            shadowRadius: 12,
-            elevation: 3,
-        },
         header: {
+            paddingHorizontal: 16,
+            paddingTop: 6,
+            paddingBottom: 10,
+            gap: 12,
+        },
+        titleRow: {
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'space-between',
-            paddingHorizontal: theme.spacing.lg,
-            paddingTop: theme.spacing.md,
-            paddingBottom: theme.spacing.sm,
+        },
+        titleLeft: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
         },
         backButton: {
-            width: 40,
-            height: 40,
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            backgroundColor: theme.colors.backgroundCard,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
             justifyContent: 'center',
             alignItems: 'center',
-            borderRadius: 20,
-            backgroundColor: theme.colors.background,
         },
-        backIcon: {
-            fontSize: 24,
-            color: theme.colors.text,
-        },
-        titleContainer: {
-            flex: 1,
-            alignItems: 'center',
-        },
-        title: {
-            fontSize: 28,
+        headerTitle: {
+            fontSize: 26,
             fontWeight: '800',
             color: theme.colors.text,
-            letterSpacing: 0.5,
+            letterSpacing: -0.4,
         },
-        subtitle: {
-            fontSize: 12,
-            color: theme.colors.textSecondary,
-            marginTop: 2,
-        },
-        headerSpacer: {
-            width: 40,
-        },
-        searchContainer: {
-            paddingHorizontal: theme.spacing.lg,
-            marginBottom: theme.spacing.sm,
-        },
-        tabs: {
+        segmentedControl: {
             flexDirection: 'row',
-            marginHorizontal: theme.spacing.lg,
-            gap: theme.spacing.sm,
+            backgroundColor: theme.colors.backgroundCard,
+            borderRadius: 18,
+            padding: 3,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            gap: 2,
         },
-        tab: {
-            flex: 1,
-            paddingVertical: theme.spacing.md,
+        segment: {
+            flexDirection: 'row',
             alignItems: 'center',
-            borderRadius: 16,
-            backgroundColor: theme.colors.background,
+            gap: 5,
+            paddingHorizontal: 12,
+            paddingVertical: 6,
+            borderRadius: 15,
         },
-        tabActive: {
+        segmentActive: {
             backgroundColor: theme.colors.primary,
         },
-        tabText: {
-            fontSize: 15,
-            fontWeight: '700',
+        segmentText: {
+            fontSize: 13,
+            fontWeight: '600',
             color: theme.colors.textSecondary,
         },
-        tabTextActive: {
-            color: theme.colors.textOnPrimary,
-        },
-        categoriesWrapper: {
-            paddingVertical: theme.spacing.md,
+        segmentTextActive: {
+            color: '#FFFFFF',
+            fontWeight: '700',
         },
         categoriesContainer: {
-            paddingHorizontal: theme.spacing.lg,
-            gap: theme.spacing.sm,
+            paddingBottom: 10,
         },
-        categoryPill: {
+        categoriesScroll: {
+            paddingHorizontal: 16,
+            gap: 8,
+        },
+        categoryChip: {
             flexDirection: 'row',
             alignItems: 'center',
-            justifyContent: 'center',
-            paddingHorizontal: 20,
-            paddingVertical: 12,
-            borderRadius: 25,
-            backgroundColor: '#F5F5F5',
-            borderWidth: 2,
-            borderColor: '#E0E0E0',
-            minWidth: 100,
+            gap: 6,
+            paddingHorizontal: 13,
+            paddingVertical: 7,
+            borderRadius: 18,
+            backgroundColor: theme.colors.backgroundCard,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
         },
-        categoryPillActive: {
+        categoryChipActive: {
             backgroundColor: theme.colors.primary,
             borderColor: theme.colors.primary,
         },
-        categoryEmoji: {
-            fontSize: 16,
-            marginRight: 6,
+        categoryChipText: {
+            fontSize: 13,
+            fontWeight: '600',
+            color: theme.colors.textSecondary,
         },
-        categoryPillText: {
-            fontSize: 15,
-            fontWeight: '700',
-            color: '#333333',
-        },
-        categoryPillTextActive: {
+        categoryChipTextActive: {
             color: '#FFFFFF',
+            fontWeight: '700',
         },
-        gridRow: {
-            gap: theme.spacing.xs,
-        },
-        gridItem: {
-            flex: 1,
-            maxWidth: '50%',
-        },
-        gridItemLeft: {
-            paddingRight: theme.spacing.xs / 2,
-        },
-        gridItemRight: {
-            paddingLeft: theme.spacing.xs / 2,
-        },
-        articlesScroll: {
-            flex: 1,
-        },
-        articlesContent: {
-            paddingHorizontal: theme.spacing.md,
-            paddingTop: theme.spacing.xs,
-            paddingBottom: theme.spacing.xl * 2,
+        listContent: {
+            paddingHorizontal: 16,
+            paddingTop: 4,
+            paddingBottom: 32,
+            flexGrow: 1,
         },
         loadingContainer: {
             flex: 1,
             justifyContent: 'center',
             alignItems: 'center',
-            paddingVertical: theme.spacing.xl * 2,
+            gap: 10,
         },
         loadingText: {
-            marginTop: theme.spacing.md,
             fontSize: 14,
             color: theme.colors.textSecondary,
+        },
+        footerLoader: {
+            paddingVertical: 16,
+            alignItems: 'center',
         },
         emptyContainer: {
             flex: 1,
             justifyContent: 'center',
             alignItems: 'center',
-            paddingVertical: theme.spacing.xl * 2,
-            paddingHorizontal: theme.spacing.xl,
+            paddingHorizontal: 32,
+            paddingVertical: 48,
         },
-        emptyIcon: {
-            fontSize: 48,
-            marginBottom: theme.spacing.md,
-        },
-        emptyText: {
-            fontSize: 16,
-            fontWeight: '600',
-            color: theme.colors.text,
-            textAlign: 'center',
-            marginBottom: theme.spacing.xs,
-        },
-        emptySubtext: {
-            fontSize: 14,
-            color: theme.colors.textSecondary,
-            textAlign: 'center',
-        },
-        errorContainer: {
-            flex: 1,
+        emptyIconBox: {
+            width: 64,
+            height: 64,
+            borderRadius: 32,
+            backgroundColor: theme.colors.backgroundCard,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
             justifyContent: 'center',
             alignItems: 'center',
-            paddingVertical: theme.spacing.xl * 2,
-            paddingHorizontal: theme.spacing.xl,
+            marginBottom: 14,
         },
-        errorIcon: {
-            fontSize: 48,
-            marginBottom: theme.spacing.md,
-        },
-        errorText: {
-            fontSize: 16,
-            fontWeight: '600',
+        emptyTitle: {
+            fontSize: 17,
+            fontWeight: '700',
             color: theme.colors.text,
             textAlign: 'center',
-            marginBottom: theme.spacing.xs,
+            marginBottom: 6,
         },
-        errorSubtext: {
+        emptyDescription: {
             fontSize: 14,
             color: theme.colors.textSecondary,
             textAlign: 'center',
-            marginBottom: theme.spacing.lg,
+            lineHeight: 20,
         },
-        retryButton: {
+        resetButton: {
+            marginTop: 16,
+            paddingHorizontal: 16,
+            paddingVertical: 9,
+            borderRadius: 18,
             backgroundColor: theme.colors.primary,
-            paddingHorizontal: theme.spacing.lg,
-            paddingVertical: theme.spacing.md,
-            borderRadius: 12,
         },
-        retryButtonText: {
-            fontSize: 14,
-            fontWeight: '600',
-            color: theme.colors.textOnPrimary,
-        },
-        footerLoader: {
-            flexDirection: 'row',
-            justifyContent: 'center',
-            alignItems: 'center',
-            paddingVertical: theme.spacing.lg,
-            gap: theme.spacing.sm,
-        },
-        footerLoaderText: {
+        resetButtonText: {
+            color: '#FFFFFF',
             fontSize: 13,
-            color: theme.colors.textSecondary,
+            fontWeight: '700',
         },
     });

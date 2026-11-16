@@ -145,6 +145,7 @@ model User {
   password   String?
   pinHash    String? // Hashed PIN for app lock
   pinEnabled Boolean    @default(false) // Whether PIN lock is active
+  isAdmin    Boolean    @default(false) // Admin panel role
   status     UserStatus @default(ACTIVE)
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt

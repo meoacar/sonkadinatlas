@@ -71,6 +71,7 @@ const darkColors = {
 };
 
 export const getTheme = (isDarkMode: boolean) => ({
+  isDark: isDarkMode,
   colors: isDarkMode ? darkColors : lightColors,
 
   // Card styling

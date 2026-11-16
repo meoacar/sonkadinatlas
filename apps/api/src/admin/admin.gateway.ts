@@ -77,9 +77,9 @@ export class AdminGateway implements OnGatewayConnection, OnGatewayDisconnect {
      */
     @SubscribeMessage('subscribe:user-activity')
     async handleUserActivitySubscription(@ConnectedSocket() client: Socket) {
-        // TODO: Implement real-time user activity tracking
+        const health = await this.adminService.getSystemHealth();
         client.emit('user-activity:update', {
-            activeUsers: 0,
+            activeUsers: health.users.active,
             recentActions: [],
         });
     }
@@ -152,13 +152,19 @@ export class AdminGateway implements OnGatewayConnection, OnGatewayDisconnect {
      * Extract admin ID from socket connection
      */
     private extractAdminId(client: Socket): string | null {
-        // TODO: Extract from JWT token in handshake auth
-        const token = client.handshake.auth?.token;
+        const token =
+            client.handshake.auth?.token ||
+            client.handshake.headers?.authorization?.replace('Bearer ', '');
         if (!token) return null;
 
-        // Decode JWT and verify admin role
-        // For now, return a placeholder
-        return 'admin-id';
+        try {
+            const jwt = require('jsonwebtoken');
+            const secret = process.env.JWT_SECRET || 'dev-secret-key';
+            const decoded: any = jwt.verify(token, secret);
+            return decoded?.sub || decoded?.id || 'admin-id';
+        } catch {
+            return null;
+        }
     }
 
     /**

@@ -127,6 +127,62 @@ export class UsersService {
   }
 
   // Admin methods
+  async createUser(data: any) {
+    if (!data.email || !data.password) {
+      throw new BadRequestException('E-posta ve şifre zorunludur');
+    }
+
+    const existingEmail = await this.prisma.user.findUnique({
+      where: { email: data.email },
+    });
+    if (existingEmail) {
+      throw new ConflictException('Bu e-posta adresi zaten kullanılıyor');
+    }
+
+    let normalizedUsername: string | undefined;
+    if (data.username) {
+      normalizedUsername = data.username.toLowerCase();
+      const existingUsername = await this.prisma.user.findUnique({
+        where: { username: normalizedUsername },
+      });
+      if (existingUsername) {
+        throw new ConflictException('Bu kullanıcı adı zaten kullanılıyor');
+      }
+    }
+
+    const bcrypt = require('bcrypt');
+    const hashedPassword = await bcrypt.hash(data.password, 10);
+
+    const firstName = data.profile?.firstName || '';
+    const lastName = data.profile?.lastName || '';
+    const displayName =
+      data.profile?.displayName || `${firstName} ${lastName}`.trim() || normalizedUsername || data.email.split('@')[0];
+
+    const created = await this.prisma.user.create({
+      data: {
+        email: data.email,
+        username: normalizedUsername,
+        password: hashedPassword,
+        status: data.status || 'ACTIVE',
+        isAdmin: Boolean(data.isAdmin),
+        profile: {
+          create: {
+            firstName: firstName || null,
+            lastName: lastName || null,
+            displayName,
+            dateOfBirth: data.profile?.dateOfBirth ? new Date(data.profile.dateOfBirth) : null,
+            heightCm: data.profile?.heightCm ?? null,
+            weightKg: data.profile?.weightKg ?? null,
+            country: data.profile?.country || 'TR',
+            timezone: data.profile?.timezone || 'Europe/Istanbul',
+          },
+        },
+      },
+    });
+
+    return this.getUserWithProfile(created.id);
+  }
+
   async getAllUsers(page = 1, limit = 10) {
     const skip = (page - 1) * limit;
 

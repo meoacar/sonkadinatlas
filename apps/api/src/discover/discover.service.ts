@@ -178,6 +178,10 @@ export class DiscoverService {
                     thumbnailUrl: true,
                     readTimeMin: true,
                     publishedAt: true,
+                    priority: true,
+                    isActive: true,
+                    author: true,
+                    expiresAt: true,
                 },
                 orderBy: [{ priority: 'desc' }, { publishedAt: 'desc' }],
                 skip,
@@ -224,7 +228,7 @@ export class DiscoverService {
                 where: { id: articleId },
             });
 
-            if (!article || !article.isActive) {
+            if (!article) {
                 throw new NotFoundException('Article not found');
             }
 
@@ -270,12 +274,15 @@ export class DiscoverService {
                     locale === 'en' && article.contentEn
                         ? article.contentEn
                         : article.contentTr,
+                contentTr: article.contentTr,
+                contentEn: article.contentEn || undefined,
                 author: article.author || undefined,
+                expiresAt: article.expiresAt || undefined,
                 relatedArticles: relatedArticles.map((a) => {
                     const relatedInteraction = relatedInteractionMap.get(a.id);
                     return this.formatArticleCard(a, locale, relatedInteraction);
                 }),
-            };
+            } as any;
         } catch (error) {
             if (error instanceof NotFoundException) {
                 throw error;
@@ -546,6 +553,8 @@ export class DiscoverService {
             id: article.id,
             title:
                 locale === 'en' && article.titleEn ? article.titleEn : article.titleTr,
+            titleTr: article.titleTr,
+            titleEn: article.titleEn || undefined,
             excerpt: article.excerpt || '',
             category: article.category,
             tags: article.tags,
@@ -553,9 +562,11 @@ export class DiscoverService {
             thumbnailUrl: article.thumbnailUrl || undefined,
             readTimeMin: article.readTimeMin,
             publishedAt: article.publishedAt,
+            priority: article.priority ?? 0,
+            isActive: article.isActive ?? true,
             isSaved: interaction?.saved || false,
             isViewed: interaction?.viewed || false,
-        };
+        } as any;
     }
 
     // Helper: Update category weight

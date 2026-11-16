@@ -299,9 +299,13 @@ export default function IdentityStep() {
                     {showDatePicker && (
                       <View style={styles.datePickerContainer}>
                         <DateTimePicker
-                          value={tempBirthDate || value || new Date()}
+                          value={tempBirthDate || value || new Date(2000, 0, 1)}
                           mode="date"
                           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          themeVariant={theme.isDark ? 'dark' : 'light'}
+                          textColor={theme.colors.text}
+                          accentColor={theme.colors.primary}
+                          locale="tr-TR"
                           onChange={(event, selectedDate) => {
                             if (Platform.OS === 'android') {
                               setShowDatePicker(false);
@@ -399,6 +403,8 @@ export default function IdentityStep() {
                     onChangeText={onChange}
                     onBlur={onBlur}
                     secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                    autoCorrect={false}
                   />
                   <TouchableOpacity
                     style={styles.eyeButton}
@@ -528,6 +534,12 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     },
     datePickerContainer: {
       marginTop: theme.spacing.md,
+      backgroundColor: theme.colors.backgroundCard,
+      borderWidth: 2,
+      borderColor: theme.colors.border,
+      borderRadius: theme.card.borderRadius,
+      padding: theme.spacing.sm,
+      overflow: 'hidden',
     },
     datePickerButtons: {
       flexDirection: 'row',

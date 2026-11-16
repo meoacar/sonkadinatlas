@@ -26,29 +26,29 @@ export default function AIProviderCreate() {
     const selectedProvider = Form.useWatch('provider', form);
 
     return (
-        <Create saveButtonProps={saveButtonProps}>
+        <Create saveButtonProps={saveButtonProps} title="Yeni AI Sağlayıcı Ekle">
             <Form {...formProps} layout="vertical">
                 <Form.Item
-                    label="Provider"
+                    label="Sağlayıcı (Provider)"
                     name="provider"
-                    rules={[{ required: true, message: 'Please select a provider' }]}
+                    rules={[{ required: true, message: 'Lütfen bir sağlayıcı seçiniz' }]}
                 >
                     <Select
                         size="large"
                         options={providerOptions}
-                        placeholder="Select AI provider"
+                        placeholder="AI sağlayıcı seçiniz"
                     />
                 </Form.Item>
 
                 <Form.Item
-                    label="Model Name"
+                    label="Model Adı"
                     name="modelName"
-                    rules={[{ required: true, message: 'Please enter model name' }]}
+                    rules={[{ required: true, message: 'Lütfen model adı giriniz' }]}
                 >
                     <Select
                         size="large"
                         showSearch
-                        placeholder="Select or type model name"
+                        placeholder="Model seçin veya yazın"
                         options={
                             selectedProvider
                                 ? modelSuggestions[selectedProvider as keyof typeof modelSuggestions]?.map((m) => ({
@@ -61,34 +61,34 @@ export default function AIProviderCreate() {
                 </Form.Item>
 
                 <Form.Item
-                    label="API Key"
+                    label="API Anahtarı"
                     name="apiKey"
                     rules={[
-                        { required: true, message: 'Please enter API key' },
-                        { min: 10, message: 'API key must be at least 10 characters' },
+                        { required: true, message: 'Lütfen API anahtarı giriniz' },
+                        { min: 10, message: 'API anahtarı en az 10 karakter olmalıdır' },
                     ]}
                 >
-                    <Input.Password size="large" placeholder="Enter API key" />
+                    <Input.Password size="large" placeholder="API anahtarını giriniz" />
                 </Form.Item>
 
                 <Form.Item
-                    label="Display Name"
+                    label="Görünen Ad"
                     name="displayName"
-                    rules={[{ required: true, message: 'Please enter display name' }]}
+                    rules={[{ required: true, message: 'Lütfen görünen ad giriniz' }]}
                 >
-                    <Input size="large" placeholder="e.g., Google Gemini 2.5 Flash" />
+                    <Input size="large" placeholder="Örn: Google Gemini 2.5 Flash" />
                 </Form.Item>
 
-                <Form.Item label="Description" name="description">
-                    <Input.TextArea rows={3} placeholder="Optional description" />
+                <Form.Item label="Açıklama" name="description">
+                    <Input.TextArea rows={3} placeholder="İsteğe bağlı açıklama" />
                 </Form.Item>
 
                 <Form.Item
-                    label="Priority"
+                    label="Öncelik"
                     name="priority"
                     initialValue={0}
-                    rules={[{ required: true, message: 'Please enter priority' }]}
-                    tooltip="Higher priority providers are used first"
+                    rules={[{ required: true, message: 'Lütfen öncelik giriniz' }]}
+                    tooltip="Yüksek öncelikli sağlayıcılar önce kullanılır"
                 >
                     <InputNumber
                         size="large"
@@ -100,12 +100,12 @@ export default function AIProviderCreate() {
                 </Form.Item>
 
                 <Form.Item
-                    label="Active"
+                    label="Durum"
                     name="isActive"
                     valuePropName="checked"
                     initialValue={true}
                 >
-                    <Switch checkedChildren="Active" unCheckedChildren="Inactive" />
+                    <Switch checkedChildren="Aktif" unCheckedChildren="Pasif" />
                 </Form.Item>
             </Form>
         </Create>

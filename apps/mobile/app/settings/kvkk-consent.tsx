@@ -11,7 +11,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/useTheme';
 import { useState, useEffect } from 'react';
+import * as SecureStore from 'expo-secure-store';
 import { useAuthStore } from '@/store/authStore';
+import { api } from '@/services/api';
 
 export default function KVKKConsentScreen() {
     const router = useRouter();
@@ -25,22 +27,57 @@ export default function KVKKConsentScreen() {
     const [analyticsConsent, setAnalyticsConsent] = useState(false);
     const [aiMemoryConsent, setAiMemoryConsent] = useState(false);
     const [thirdPartyConsent, setThirdPartyConsent] = useState(false);
+    const [existingPrefs, setExistingPrefs] = useState<Record<string, any>>({});
 
     const [hasChanges, setHasChanges] = useState(false);
 
     useEffect(() => {
-        // TODO: Load user's current consent preferences from backend
         loadConsentPreferences();
     }, []);
 
     const loadConsentPreferences = async () => {
-        // TODO: Fetch from API
-        // For now, using mock data
+        try {
+            const localStr = await SecureStore.getItemAsync('kvkkConsents');
+            if (localStr) {
+                const parsed = JSON.parse(localStr);
+                setMarketingConsent(Boolean(parsed.marketingConsent));
+                setAnalyticsConsent(Boolean(parsed.analyticsConsent));
+                setAiMemoryConsent(Boolean(parsed.aiMemoryConsent));
+                setThirdPartyConsent(Boolean(parsed.thirdPartyConsent));
+            }
+
+            const meResponse = await api.get<any>('/me');
+            const prefs = meResponse?.profile?.preferencesJson || {};
+            setExistingPrefs(prefs);
+            if (prefs.kvkkConsents) {
+                setMarketingConsent(Boolean(prefs.kvkkConsents.marketingConsent));
+                setAnalyticsConsent(Boolean(prefs.kvkkConsents.analyticsConsent));
+                setAiMemoryConsent(Boolean(prefs.kvkkConsents.aiMemoryConsent));
+                setThirdPartyConsent(Boolean(prefs.kvkkConsents.thirdPartyConsent));
+            }
+        } catch (error) {
+            console.warn('Could not load KVKK preferences from server, using cached:', error);
+        }
     };
 
     const handleSave = async () => {
         try {
-            // TODO: Save to backend API
+            const kvkkConsents = {
+                dataProcessing: true,
+                marketingConsent,
+                analyticsConsent,
+                aiMemoryConsent,
+                thirdPartyConsent,
+                updatedAt: new Date().toISOString(),
+            };
+            await SecureStore.setItemAsync('kvkkConsents', JSON.stringify(kvkkConsents));
+            await api.patch('/me', {
+                preferencesJson: {
+                    ...existingPrefs,
+                    kvkkConsents,
+                },
+            });
+            setHasChanges(false);
             Alert.alert(
                 'Başarılı',
                 'KVKK tercihleriniz güncellendi.',

@@ -95,7 +95,8 @@ function AppContent() {
     if (isAuthenticated) {
       registerForPushNotifications();
     }
-  }, [isAuthenticated, registerForPushNotifications]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
 
   // Sync subscription status on app start
   // Requirement 14.1: THE System SHALL abonelik durumunu sunucuda saklar
@@ -165,25 +166,13 @@ function AppContent() {
   }, [isAuthenticated, isLoading]);
 
   // 3. NOW we can do conditional rendering (after all hooks are called)
-  const showLoading = isLoading || !pinCheckComplete;
-
-  // Show animated splash while app is not ready
-  if (!appIsReady || showAnimatedSplash) {
-    return (
-      <AnimatedSplash
-        onAnimationEnd={() => {
-          console.log('[Layout] AnimatedSplash ended');
-          setShowAnimatedSplash(false);
-        }}
-      />
-    );
-  }
+  const showLoading = !appIsReady || isLoading || !pinCheckComplete;
 
   return (
-    <>
+    <View style={{ flex: 1 }}>
       {showLoading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" color="#007AFF" />
+          <ActivityIndicator size="large" color="#FF69B4" />
         </View>
       ) : (
         <Stack
@@ -192,7 +181,15 @@ function AppContent() {
           }}
         />
       )}
-    </>
+      {showAnimatedSplash && (
+        <AnimatedSplash
+          onAnimationEnd={() => {
+            console.log('[Layout] AnimatedSplash ended');
+            setShowAnimatedSplash(false);
+          }}
+        />
+      )}
+    </View>
   );
 }
 

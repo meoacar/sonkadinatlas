@@ -39,21 +39,21 @@ export default function AIProvidersList() {
 
     const columns = [
         {
-            title: 'Provider',
+            title: 'Sağlayıcı',
             dataIndex: 'provider',
             key: 'provider',
             render: (provider: keyof typeof providerInfo) => {
                 const info = providerInfo[provider];
                 return (
                     <Space>
-                        <span style={{ fontSize: 20 }}>{info.icon}</span>
-                        <span>{info.name}</span>
+                        <span style={{ fontSize: 20 }}>{info?.icon}</span>
+                        <span>{info?.name || provider}</span>
                     </Space>
                 );
             },
         },
         {
-            title: 'Display Name',
+            title: 'Görünen Ad',
             dataIndex: 'displayName',
             key: 'displayName',
         },
@@ -64,7 +64,7 @@ export default function AIProvidersList() {
             render: (text: string) => <Tag color="blue">{text}</Tag>,
         },
         {
-            title: 'API Key',
+            title: 'API Anahtarı',
             dataIndex: 'apiKey',
             key: 'apiKey',
             render: (key: string) => (
@@ -74,7 +74,7 @@ export default function AIProvidersList() {
             ),
         },
         {
-            title: 'Status',
+            title: 'Durum',
             dataIndex: 'isActive',
             key: 'isActive',
             align: 'center' as const,
@@ -83,12 +83,12 @@ export default function AIProvidersList() {
                     icon={isActive ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
                     color={isActive ? 'success' : 'default'}
                 >
-                    {isActive ? 'Active' : 'Inactive'}
+                    {isActive ? 'Aktif' : 'Pasif'}
                 </Tag>
             ),
         },
         {
-            title: 'Priority',
+            title: 'Öncelik',
             dataIndex: 'priority',
             key: 'priority',
             align: 'center' as const,
@@ -97,7 +97,7 @@ export default function AIProvidersList() {
             ),
         },
         {
-            title: 'Actions',
+            title: 'İşlemler',
             key: 'actions',
             align: 'center' as const,
             render: (_: any, record: AIProvider) => (
@@ -116,7 +116,7 @@ export default function AIProvidersList() {
 
     return (
         <List
-            title="AI Provider Management"
+            title="AI Sağlayıcı Yönetimi"
             headerButtons={
                 <CreateButton
                     onClick={() => router.push('/settings/ai-providers/create')}

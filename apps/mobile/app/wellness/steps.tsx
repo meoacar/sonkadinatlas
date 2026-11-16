@@ -14,6 +14,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { Platform } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
 import { wellnessService } from '@/services/api';
 import { useAuthStore } from '@/store/authStore';
@@ -33,6 +35,7 @@ export default function StepsScreen() {
   const [stepsInput, setStepsInput] = useState('');
   const [goalInput, setGoalInput] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [timeFilter, setTimeFilter] = useState<'week' | 'month'>('week');
 
   const styles = createStyles(theme);
@@ -424,10 +427,7 @@ export default function StepsScreen() {
               <Text style={styles.inputLabel}>Tarih</Text>
               <TouchableOpacity
                 style={styles.dateButton}
-                onPress={() => {
-                  // TODO: Add date picker
-                  Alert.alert('Bilgi', 'Tarih seçici yakında eklenecek');
-                }}
+                onPress={() => setShowDatePicker(!showDatePicker)}
               >
                 <Text style={styles.dateButtonText}>
                   {selectedDate.toLocaleDateString('tr-TR', {
@@ -437,6 +437,28 @@ export default function StepsScreen() {
                   })}
                 </Text>
               </TouchableOpacity>
+              {showDatePicker && (
+                <View style={{ marginTop: 8, backgroundColor: theme.colors.backgroundCard, borderRadius: 12, overflow: 'hidden' }}>
+                  <DateTimePicker
+                    value={selectedDate}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    themeVariant={theme.isDark ? 'dark' : 'light'}
+                    textColor={theme.colors.text}
+                    accentColor={theme.colors.primary}
+                    locale="tr-TR"
+                    maximumDate={new Date()}
+                    onChange={(event, date) => {
+                      if (Platform.OS === 'android') {
+                        setShowDatePicker(false);
+                      }
+                      if (date) {
+                        setSelectedDate(date);
+                      }
+                    }}
+                  />
+                </View>
+              )}
             </View>
 
             <View style={styles.inputContainer}>

@@ -100,18 +100,24 @@ export default function PeriodStep() {
                   </Text>
                 </TouchableOpacity>
                 {showDatePicker && (
-                  <DateTimePicker
-                    value={value || new Date()}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={(event, selectedDate) => {
-                      setShowDatePicker(Platform.OS === 'ios');
-                      if (selectedDate) {
-                        onChange(selectedDate);
-                      }
-                    }}
-                    maximumDate={new Date()}
-                  />
+                  <View style={styles.datePickerContainer}>
+                    <DateTimePicker
+                      value={value || new Date()}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      themeVariant={theme.isDark ? 'dark' : 'light'}
+                      textColor={theme.colors.text}
+                      accentColor={theme.colors.primary}
+                      locale="tr-TR"
+                      onChange={(event, selectedDate) => {
+                        setShowDatePicker(Platform.OS === 'ios');
+                        if (selectedDate) {
+                          onChange(selectedDate);
+                        }
+                      }}
+                      maximumDate={new Date()}
+                    />
+                  </View>
                 )}
               </>
             )}
@@ -190,5 +196,14 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       ...theme.typography.caption,
       color: theme.colors.textSecondary,
       marginTop: theme.spacing.xs,
+    },
+    datePickerContainer: {
+      marginTop: theme.spacing.md,
+      backgroundColor: theme.colors.backgroundCard,
+      borderWidth: 2,
+      borderColor: theme.colors.border,
+      borderRadius: theme.card.borderRadius,
+      padding: theme.spacing.sm,
+      overflow: 'hidden',
     },
   });

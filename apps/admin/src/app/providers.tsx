@@ -3,6 +3,7 @@
 import { Refine } from '@refinedev/core';
 import { RefineThemes, ThemedLayoutV2, useNotificationProvider } from '@refinedev/antd';
 import { ConfigProvider } from 'antd';
+import trTR from 'antd/locale/tr_TR';
 import routerProvider from '@refinedev/nextjs-router';
 import { dataProvider } from '@/providers/dataProvider';
 import { authProvider } from '@/providers/authProvider';
@@ -23,7 +24,61 @@ import {
   BulbOutlined,
   TrophyOutlined,
   WarningOutlined,
+  BarChartOutlined,
+  TeamOutlined,
+  DollarOutlined,
 } from '@ant-design/icons';
+
+const trTranslations: Record<string, string> = {
+  'buttons.create': 'Oluştur',
+  'buttons.save': 'Kaydet',
+  'buttons.logout': 'Çıkış Yap',
+  'buttons.delete': 'Sil',
+  'buttons.edit': 'Düzenle',
+  'buttons.cancel': 'İptal',
+  'buttons.confirm': 'Emin misiniz?',
+  'buttons.filter': 'Filtrele',
+  'buttons.clear': 'Temizle',
+  'buttons.refresh': 'Yenile',
+  'buttons.show': 'Görüntüle',
+  'buttons.undo': 'Geri Al',
+  'buttons.import': 'İçe Aktar',
+  'buttons.export': 'Dışa Aktar',
+  'buttons.clone': 'Kopyala',
+  'buttons.notAccessTitle': 'Erişim izniniz yok',
+  'actions.list': 'Liste',
+  'actions.create': 'Oluştur',
+  'actions.edit': 'Düzenle',
+  'actions.show': 'Detay',
+  'table.actions': 'İşlemler',
+  'table.inTotal': 'Toplam',
+  'warnWhenUnsavedChanges': 'Kaydedilmemiş değişiklikleriniz var. Çıkmak istediğinize emin misiniz?',
+  'notifications.success': 'İşlem Başarılı',
+  'notifications.error': 'Hata oluştu (kod: {{statusCode}})',
+  'notifications.undoable': 'İşlemi geri almak için {{seconds}} saniyeniz var.',
+  'notifications.createSuccess': '{{resource}} başarıyla oluşturuldu',
+  'notifications.createError': '{{resource}} oluşturulurken hata oluştu (kod: {{statusCode}})',
+  'notifications.deleteSuccess': '{{resource}} başarıyla silindi',
+  'notifications.deleteError': '{{resource}} silinirken hata oluştu (kod: {{statusCode}})',
+  'notifications.editSuccess': '{{resource}} başarıyla güncellendi',
+  'notifications.editError': '{{resource}} güncellenirken hata oluştu (kod: {{statusCode}})',
+  'notifications.importProgress': 'İçe aktarılıyor: {{processed}}/{{total}}',
+  'loading': 'Yükleniyor...',
+};
+
+const i18nProvider = {
+  translate: (key: string, options?: any, defaultMessage?: string) => {
+    let text = trTranslations[key] || defaultMessage || key;
+    if (options && typeof options === 'object') {
+      Object.keys(options).forEach((k) => {
+        text = text.replace(new RegExp(`{{${k}}}`, 'g'), String(options[k]));
+      });
+    }
+    return text;
+  },
+  changeLocale: async () => {},
+  getLocale: () => 'tr',
+};
 // Monitoring imports (will be enabled after package installation)
 // import { initSentry } from '@/lib/sentry';
 // import { initPostHog } from '@/lib/posthog';
@@ -47,12 +102,13 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ConfigProvider theme={RefineThemes.Blue}>
+      <ConfigProvider theme={RefineThemes.Blue} locale={trTR}>
         <Refine
           routerProvider={routerProvider}
           dataProvider={dataProvider}
           authProvider={authProvider}
           notificationProvider={useNotificationProvider}
+          i18nProvider={i18nProvider}
           resources={[
             {
               name: 'dashboard',
@@ -74,12 +130,28 @@ export default function Providers({ children }: { children: React.ReactNode }) {
               },
             },
             {
+              name: 'user-segmentation',
+              list: '/user-segmentation',
+              meta: {
+                label: 'Kullanıcı Segmentasyonu',
+                icon: <TeamOutlined />,
+              },
+            },
+            {
               name: 'subscriptions',
               list: '/subscriptions',
               show: '/subscriptions/show/:id',
               meta: {
                 label: 'Abonelikler',
                 icon: <CrownOutlined />,
+              },
+            },
+            {
+              name: 'financial-dashboard',
+              list: '/financial-dashboard',
+              meta: {
+                label: 'Finansal Panel',
+                icon: <DollarOutlined />,
               },
             },
             {
@@ -188,6 +260,15 @@ export default function Providers({ children }: { children: React.ReactNode }) {
               meta: {
                 label: 'AI Yapılandırması',
                 icon: <BulbOutlined />,
+              },
+            },
+            {
+              name: 'ai-analytics',
+              list: '/ai-analytics',
+              meta: {
+                label: 'AI Analitiği',
+                parent: 'ai',
+                icon: <BarChartOutlined />,
               },
             },
             {

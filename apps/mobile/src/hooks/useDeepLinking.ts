@@ -42,8 +42,9 @@ export function useDeepLinking() {
             console.log('[DeepLink] Parsed:', { hostname, path, queryParams });
 
             // Handle different deep link routes
-            if (!path) {
-                router.push('/(tabs)/home');
+            // When launched normally in Expo Go (e.g. exp://127.0.0.1:8081), path is null/empty;
+            // let index.tsx handle initial auth routing instead of forcing navigation on mount.
+            if (!path || path === '/' || path === '--/') {
                 return;
             }
 

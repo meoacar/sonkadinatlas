@@ -18,6 +18,7 @@ interface AnswerCardProps {
     onVote: (type: VoteType) => void;
     onShare?: () => void;
     onReport?: () => void;
+    onReportComment?: (commentId: string) => void;
     comments?: AnswerComment[];
     onSubmitComment?: (content: string) => Promise<void>;
     isSubmittingComment?: boolean;
@@ -30,6 +31,7 @@ export function AnswerCard({
     onVote,
     onShare,
     onReport,
+    onReportComment,
     comments = [],
     onSubmitComment,
     isSubmittingComment = false,
@@ -221,8 +223,8 @@ export function AnswerCard({
                             <CommentList
                                 comments={comments}
                                 onReportComment={(commentId) => {
-                                    console.log('Report comment:', commentId);
-                                    // TODO: Handle comment reporting
+                                    haptics.warning();
+                                    onReportComment?.(commentId);
                                 }}
                             />
                         ) : (

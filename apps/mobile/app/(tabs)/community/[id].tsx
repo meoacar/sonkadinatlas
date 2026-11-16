@@ -631,6 +631,7 @@ export default function QuestionDetailScreen() {
                                     onVote={(voteType) => handleVote(answer.id, voteType)}
                                     onShare={() => handleShareAnswer(answer.id, answer.content)}
                                     onReport={() => handleReportAnswer(answer.id)}
+                                    onReportComment={(commentId) => handleReportComment(commentId)}
                                     comments={answerCommentsMap[answer.id] || []}
                                     onSubmitComment={(content) => handleSubmitAnswerComment(answer.id, content)}
                                     isSubmittingComment={createAnswerComment.isPending}

@@ -179,9 +179,10 @@ export class AdminService {
             : 0;
 
         // Content stats
-        const [questions, answers, conversations] = await Promise.all([
+        const [questions, answers, articles, conversations] = await Promise.all([
             this.prisma.question.count(),
             this.prisma.answer.count(),
+            this.prisma.educationalArticle.count(),
             this.prisma.conversation.count(),
         ]);
 
@@ -207,7 +208,7 @@ export class AdminService {
             content: {
                 questions,
                 answers,
-                articles: 0, // Article model doesn't exist
+                articles,
                 conversations,
             },
         };
@@ -363,8 +364,20 @@ export class AdminService {
 
         for (const userId of userIds) {
             try {
-                // TODO: Integrate with notification service
-                // await this.notificationService.send(userId, notification);
+                await this.prisma.reminder.create({
+                    data: {
+                        userId,
+                        type: 'CUSTOM',
+                        payloadJson: {
+                            title: notification.title,
+                            body: notification.body,
+                            sentAt: new Date().toISOString(),
+                            source: 'ADMIN_BULK',
+                        },
+                        nextRunAt: new Date(),
+                        active: true,
+                    },
+                });
                 result.success++;
             } catch (error: any) {
                 result.failed++;
@@ -495,8 +508,14 @@ export class AdminService {
             throw new BadRequestException('Admin bulunamadı');
         }
 
-        // Check admin status (simplified - in production use proper role system)
-        const isAdmin = admin.email.endsWith('@admin.wellnesscompanion.com') ||
+        // Check admin status
+        const adminRecord = await this.prisma.user.findUnique({
+            where: { id: adminId },
+            select: { isAdmin: true, email: true },
+        });
+        const isAdmin =
+            Boolean(adminRecord?.isAdmin) ||
+            admin.email.endsWith('@admin.wellnesscompanion.com') ||
             (process.env.ADMIN_EMAILS || '').split(',').includes(admin.email);
 
         if (!isAdmin) {
@@ -536,13 +555,22 @@ export class AdminService {
 
         return {
             user: userWithoutSensitive,
-            impersonationToken: this.generateImpersonationToken(adminId, targetUserId),
+            impersonationToken: this.generateImpersonationToken(adminId, targetUserId, targetUser.email),
         };
     }
 
-    private generateImpersonationToken(adminId: string, targetUserId: string): string {
-        // TODO: Generate JWT token with special claims
-        return Buffer.from(`${adminId}:${targetUserId}:${Date.now()}`).toString('base64');
+    private generateImpersonationToken(adminId: string, targetUserId: string, targetEmail?: string): string {
+        const jwt = require('jsonwebtoken');
+        const secret = process.env.JWT_SECRET || 'dev-secret-key';
+        return jwt.sign(
+            {
+                sub: targetUserId,
+                email: targetEmail,
+                impersonatedBy: adminId,
+            },
+            secret,
+            { expiresIn: '1h' },
+        );
     }
 
     /**

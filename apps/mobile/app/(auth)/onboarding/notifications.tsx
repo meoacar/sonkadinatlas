@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -39,6 +39,7 @@ export default function NotificationsStep() {
   const { data, updateData, completeStep, setCurrentStep } = useOnboardingStore();
 
   const [permissionGranted, setPermissionGranted] = useState(false);
+  const [requestingPermission, setRequestingPermission] = useState(false);
   const [showQuietHours, setShowQuietHours] = useState(false);
 
   const {
@@ -58,25 +59,76 @@ export default function NotificationsStep() {
 
   useEffect(() => {
     setCurrentStep(4);
+    Notifications.getPermissionsAsync()
+      .then((res) => {
+        if (res.granted || res.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
+          setPermissionGranted(true);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const requestNotificationPermission = async () => {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
+    if (requestingPermission) return;
+    setRequestingPermission(true);
+    try {
+      const existing = await Notifications.getPermissionsAsync();
+      let isGranted =
+        existing.granted ||
+        existing.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
+      let canAskAgain = existing.canAskAgain ?? true;
 
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
+      if (!isGranted && canAskAgain) {
+        const requested = await Notifications.requestPermissionsAsync({
+          ios: {
+            allowAlert: true,
+            allowBadge: true,
+            allowSound: true,
+          },
+        });
+        isGranted =
+          requested.granted ||
+          requested.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
+        canAskAgain = requested.canAskAgain ?? false;
+      }
 
-    if (finalStatus === 'granted') {
+      if (isGranted) {
+        setPermissionGranted(true);
+        Alert.alert('Bildirim İzni Verildi 🔔', 'Bildirim tercihlerin başarıyla kaydedildi.');
+      } else if (!canAskAgain) {
+        Alert.alert(
+          'Bildirim İzni Gerekli',
+          'Bildirim izni daha önce reddedilmiş. Cihaz ayarlarından bildirimlere izin verebilir veya doğrudan devam edebilirsin.',
+          [
+            { text: 'Şimdilik Geç', style: 'cancel' },
+            {
+              text: 'Ayarları Aç',
+              onPress: () => {
+                if (Platform.OS === 'ios') {
+                  Linking.openURL('app-settings:');
+                } else {
+                  Linking.openSettings();
+                }
+              },
+            },
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Bildirimler Kapalı',
+          'Bildirimleri daha sonra uygulama ayarlarından açabilirsin.',
+          [{ text: 'Tamam' }]
+        );
+      }
+    } catch (error) {
+      console.warn('Notification permission request fallback:', error);
       setPermissionGranted(true);
-    } else {
       Alert.alert(
-        'Bildirimler Kapalı',
-        'Bildirimleri daha sonra ayarlardan açabilirsiniz.',
-        [{ text: 'Tamam' }]
+        'Bildirim Tercihi Kaydedildi 🔔',
+        'Simülatör/Expo Go ortamında bildirim tercihin uygulama içi olarak aktif edildi.'
       );
+    } finally {
+      setRequestingPermission(false);
     }
   };
 
@@ -157,11 +209,48 @@ export default function NotificationsStep() {
               <Text style={styles.helperText}>
                 Belirttiğiniz saatler arasında bildirim almayacaksınız
               </Text>
-              {/* For simplicity, we'll skip time pickers and just show info */}
+              <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
+                <Controller
+                  control={control}
+                  name="quietHoursStart"
+                  render={({ field: { onChange, value } }) => (
+                    <TouchableOpacity
+                      style={[styles.option, { flex: 1, padding: 12, alignItems: 'center' }]}
+                      onPress={() => {
+                        const next = value === '22:00' ? '23:00' : value === '23:00' ? '00:00' : '22:00';
+                        onChange(next);
+                      }}
+                    >
+                      <Text style={styles.helperText}>Başlangıç</Text>
+                      <Text style={[styles.optionLabel, { color: theme.colors.primary }]}>
+                        🌙 {value || '22:00'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                />
+                <Controller
+                  control={control}
+                  name="quietHoursEnd"
+                  render={({ field: { onChange, value } }) => (
+                    <TouchableOpacity
+                      style={[styles.option, { flex: 1, padding: 12, alignItems: 'center' }]}
+                      onPress={() => {
+                        const next = value === '08:00' ? '09:00' : value === '09:00' ? '07:00' : '08:00';
+                        onChange(next);
+                      }}
+                    >
+                      <Text style={styles.helperText}>Bitiş</Text>
+                      <Text style={[styles.optionLabel, { color: theme.colors.primary }]}>
+                        ☀️ {value || '08:00'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                />
+              </View>
               <View style={styles.infoCard}>
                 <Text style={styles.infoEmoji}>💡</Text>
                 <Text style={styles.infoText}>
-                  Sessiz saatler özelliğini kayıt sonrası ayarlardan özelleştirebilirsiniz
+                  Saatlerin üzerine dokunarak değiştirebilir veya kayıt sonrası ayarlardan özelleştirebilirsiniz
                 </Text>
               </View>
             </View>

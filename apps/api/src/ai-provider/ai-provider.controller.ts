@@ -9,12 +9,12 @@ import {
     UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { AdminGuard } from '../common/guards/admin.guard';
 import { AIProviderService, CreateAIProviderDto, UpdateAIProviderDto } from './ai-provider.service';
 import { AIProvider } from '@prisma/client';
 
-// TODO: Add admin role guard
 @Controller('ai-providers')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), AdminGuard)
 export class AIProviderController {
     constructor(private readonly aiProviderService: AIProviderService) { }
 

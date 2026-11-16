@@ -5,13 +5,13 @@ import { Form, Input, Select, InputNumber, Switch } from 'antd';
 import { useList } from '@refinedev/core';
 
 const planOptions = [
-    { label: 'Free', value: 'free' },
+    { label: 'Ücretsiz (Free)', value: 'free' },
     { label: 'Premium', value: 'premium' },
 ];
 
 export default function ModelPolicyCreate() {
     const { formProps, saveButtonProps } = useForm({
-        resource: 'model-policies',
+        resource: 'ai/model-policies',
         action: 'create',
     });
 
@@ -42,29 +42,29 @@ export default function ModelPolicyCreate() {
     }
 
     return (
-        <Create saveButtonProps={saveButtonProps}>
+        <Create saveButtonProps={saveButtonProps} title="Yeni Model Politikası Oluştur">
             <Form {...formProps} layout="vertical">
                 <Form.Item
-                    label="Subscription Plan"
+                    label="Abonelik Planı"
                     name="plan"
-                    rules={[{ required: true, message: 'Please select a plan' }]}
+                    rules={[{ required: true, message: 'Lütfen plan seçiniz' }]}
                 >
                     <Select
                         size="large"
                         options={planOptions}
-                        placeholder="Select subscription plan"
+                        placeholder="Abonelik planı seçiniz"
                     />
                 </Form.Item>
 
                 <Form.Item
-                    label="AI Provider"
+                    label="AI Sağlayıcı"
                     name="provider"
-                    rules={[{ required: true, message: 'Please select a provider' }]}
+                    rules={[{ required: true, message: 'Lütfen sağlayıcı seçiniz' }]}
                 >
                     <Select
                         size="large"
                         options={providerOptions}
-                        placeholder="Select AI provider"
+                        placeholder="AI sağlayıcı seçiniz"
                         onChange={(value) => {
                             // Auto-fill model name from selected provider
                             const selectedProvider = providers.find((p: any) => p.provider === value);
@@ -76,19 +76,19 @@ export default function ModelPolicyCreate() {
                 </Form.Item>
 
                 <Form.Item
-                    label="Model Name"
+                    label="Model Adı"
                     name="modelName"
-                    rules={[{ required: true, message: 'Please enter model name' }]}
+                    rules={[{ required: true, message: 'Lütfen model adı giriniz' }]}
                 >
-                    <Input size="large" placeholder="e.g., gemini-2.5-flash" />
+                    <Input size="large" placeholder="Örn: gemini-2.5-flash" />
                 </Form.Item>
 
                 <Form.Item
-                    label="Temperature"
+                    label="Sıcaklık (Temperature)"
                     name="temperature"
                     initialValue={0.7}
-                    rules={[{ required: true, message: 'Please enter temperature' }]}
-                    tooltip="Controls randomness (0.0 = deterministic, 1.0 = very random)"
+                    rules={[{ required: true, message: 'Lütfen sıcaklık değeri giriniz' }]}
+                    tooltip="Yaratıcılık seviyesi (0.0 = deterministik, 1.0 = yaratıcı)"
                 >
                     <InputNumber
                         size="large"
@@ -101,11 +101,11 @@ export default function ModelPolicyCreate() {
                 </Form.Item>
 
                 <Form.Item
-                    label="Max Tokens"
+                    label="Maksimum Token"
                     name="maxTokens"
                     initialValue={1024}
-                    rules={[{ required: true, message: 'Please enter max tokens' }]}
-                    tooltip="Maximum number of tokens in the response"
+                    rules={[{ required: true, message: 'Lütfen maksimum token sayısı giriniz' }]}
+                    tooltip="Yanıtta üretilebilecek maksimum token sayısı"
                 >
                     <InputNumber
                         size="large"
@@ -117,10 +117,10 @@ export default function ModelPolicyCreate() {
                 </Form.Item>
 
                 <Form.Item
-                    label="Tools Enabled"
+                    label="Etkin Araçlar (JSON)"
                     name="toolsEnabledJson"
                     initialValue="[]"
-                    tooltip="JSON array of enabled tools (e.g., ['web_search', 'calculator'])"
+                    tooltip="Etkin araçların JSON dizisi (Örn: ['web_search', 'calculator'])"
                 >
                     <Input.TextArea
                         rows={3}
