@@ -9,21 +9,22 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
-  Animated,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/store/authStore';
 import { chatService, quotaService } from '@/services/api';
 import { SSEClient } from '@/lib/sse';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@/hooks/useTheme';
-import { usePremium, useQuota } from '@/hooks/usePremium';
+import { usePremium } from '@/hooks/usePremium';
 import { UpgradePrompt } from '@/components/premium/UpgradePrompt';
 import { QuotaExceededModal } from '@/components/premium/QuotaExceededModal';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 
 interface Message {
   id: string;
@@ -33,65 +34,115 @@ interface Message {
   isStreaming?: boolean;
 }
 
+interface NovaQuotaStatus {
+  used: number;
+  limit: number;
+  remaining: number;
+  resetsAt: string;
+  resetDate?: string;
+  percentage: number;
+  hasQuota: boolean;
+  maxMessageLength: number;
+  isNovaEnabled: boolean;
+  maintenanceMessage: string;
+  systemGreeting: string;
+}
+
+const SUGGESTED_PROMPTS = [
+  {
+    icon: 'water-outline' as const,
+    color: '#EC4899',
+    text: 'Regl krampları için ne iyi gelir?',
+  },
+  {
+    icon: 'sparkles-outline' as const,
+    color: '#8B5CF6',
+    text: 'Yumurtlama dönemimi nasıl takip edebilirim?',
+  },
+  {
+    icon: 'nutrition-outline' as const,
+    color: '#10B981',
+    text: 'PMS döneminde beslenme nasıl olmalı?',
+  },
+  {
+    icon: 'moon-outline' as const,
+    color: '#3B82F6',
+    text: 'Uyku kalitemi artırmak için 3 öneri ver',
+  },
+];
+
 export default function ChatScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const params = useLocalSearchParams<{ prompt?: string }>();
   const insets = useSafeAreaInsets();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const queryClient = useQueryClient();
+
   const [conversationId, setConversationId] = useState<string>('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
+
+  useEffect(() => {
+    if (params?.prompt && typeof params.prompt === 'string') {
+      setInputText(params.prompt);
+    }
+  }, [params?.prompt]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
+  const [showDoctorCoachUpgrade, setShowDoctorCoachUpgrade] = useState(false);
   const [showQuotaExceeded, setShowQuotaExceeded] = useState(false);
+
   const flatListRef = useRef<FlatList>(null);
   const sseClient = useRef<SSEClient>(new SSEClient());
   const streamingContentRef = useRef('');
-  const quotaAnimValue = useRef(new Animated.Value(1)).current;
 
-  // Premium and quota hooks
   const { isPremium } = usePremium();
-  const { quota, isDepleted, isLow, increment: incrementQuota } = useQuota();
+
+  // Fetch live NOVA quota & admin limits from GET /quota
+  const { data: novaQuota, refetch: refetchQuota } = useQuery<NovaQuotaStatus>({
+    queryKey: ['nova', 'quota'],
+    queryFn: () => quotaService.getStatus() as Promise<NovaQuotaStatus>,
+    enabled: isAuthenticated,
+    staleTime: 30 * 1000,
+  });
+
+  const maxMessageLength = novaQuota?.maxMessageLength || 500;
+  const isNovaEnabled = novaQuota?.isNovaEnabled !== false;
+  const isDepleted = novaQuota ? novaQuota.remaining <= 0 : false;
+  const isLow = novaQuota ? novaQuota.percentage >= 80 && !isDepleted : false;
 
   // Load or create conversation ID on mount
   useEffect(() => {
     const loadConversation = async () => {
       try {
-        // Try to load existing conversation ID
         const savedConvId = await AsyncStorage.getItem('currentConversationId');
 
         if (savedConvId) {
-          console.log('[Chat] Loading existing conversation:', savedConvId);
           setConversationId(savedConvId);
-
-          // Load conversation history
           try {
-            const history = await chatService.getHistory(savedConvId);
-            if (history && history.messages) {
-              const formattedMessages = history.messages.reverse().map((msg: any, index: number) => ({
-                id: msg.id || `${msg.role}-${Date.now()}-${index}`,
-                role: msg.role,
-                content: msg.content,
-                createdAt: msg.createdAt,
-              }));
+            const history: any = await chatService.getHistory(savedConvId);
+            if (history?.messages) {
+              const formattedMessages = [...history.messages]
+                .reverse()
+                .map((msg: any, index: number) => ({
+                  id: msg.id || `${msg.role}-${Date.now()}-${index}`,
+                  role: msg.role,
+                  content: msg.content,
+                  createdAt: msg.createdAt,
+                }));
               setMessages(formattedMessages);
-              console.log('[Chat] Loaded', formattedMessages.length, 'messages');
             }
-          } catch (error) {
-            console.log('[Chat] Could not load history:', error);
+          } catch {
+            // No prior history yet
           }
         } else {
-          // Create new conversation
           const newId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-          console.log('[Chat] Creating new conversation:', newId);
           setConversationId(newId);
           await AsyncStorage.setItem('currentConversationId', newId);
         }
-      } catch (error) {
-        console.error('[Chat] Error loading conversation:', error);
-        // Fallback to new conversation
+      } catch {
         const newId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
         setConversationId(newId);
       }
@@ -100,147 +151,56 @@ export default function ChatScreen() {
     loadConversation();
   }, []);
 
-  // Animate quota when it updates
-  useEffect(() => {
-    if (quota) {
-      Animated.sequence([
-        Animated.timing(quotaAnimValue, {
-          toValue: 1.2,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(quotaAnimValue, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
-  }, [quota]);
-
-  // Send message mutation
   const sendMessageMutation = useMutation({
     mutationFn: async (content: string) => {
-      console.log('[Chat] sendMessage mutation called with conversationId:', conversationId);
-      const result = await chatService.sendMessage(conversationId, content);
-      console.log('[Chat] sendMessage response:', result);
-      return result;
+      return chatService.sendMessage(conversationId, content);
     },
     onSuccess: async (response: any) => {
-      console.log('[Chat] sendMessage onSuccess, response:', response);
-      // Update conversation ID if backend created a new one
-      const newConvId = response.conversationId;
+      const newConvId = response?.conversationId;
       if (newConvId && newConvId !== conversationId) {
-        console.log('[Chat] Updating conversation ID:', newConvId);
         setConversationId(newConvId);
-        // Save to AsyncStorage
         await AsyncStorage.setItem('currentConversationId', newConvId);
       }
-      // Wait a bit for the message to be committed to DB
-      await new Promise(resolve => setTimeout(resolve, 100));
-      console.log('[Chat] About to start streaming with convId:', newConvId || conversationId);
-      // Use the new conversation ID for streaming
+      await new Promise((resolve) => setTimeout(resolve, 100));
       startStreaming(newConvId || conversationId);
     },
     onError: (error: any) => {
-      console.error('[Chat] sendMessage onError:', error);
-      // Remove the user message that failed to send
       setMessages((prev) => prev.slice(0, -1));
       handleError(error);
     },
   });
 
   const handleError = (error: any) => {
-    const errorMessage = error.message || 'Bir hata oluştu';
+    const errorMessage = error?.message || 'Bir hata oluştu';
 
-    // Check for specific error types
-    if (errorMessage.includes('kota') || errorMessage.includes('quota')) {
-      // Quota exceeded error - show upgrade prompt
-      setShowUpgradePrompt(true);
-    } else if (
-      errorMessage.includes('network') ||
-      errorMessage.includes('bağlantı') ||
-      errorMessage.includes('internet') ||
-      error.name === 'TypeError' ||
-      error.name === 'NetworkError'
+    if (
+      errorMessage.toLowerCase().includes('kota') ||
+      errorMessage.toLowerCase().includes('quota')
     ) {
-      // Network error
+      setShowQuotaExceeded(true);
+      refetchQuota();
+    } else if (
+      errorMessage.toLowerCase().includes('network') ||
+      errorMessage.toLowerCase().includes('bağlantı') ||
+      error?.name === 'TypeError' ||
+      error?.name === 'NetworkError'
+    ) {
       Alert.alert(
         'Bağlantı Hatası',
         'İnternet bağlantınızı kontrol edin ve tekrar deneyin.',
-        [
-          { text: 'İptal', style: 'cancel' },
-          {
-            text: 'Tekrar Dene',
-            onPress: () => {
-              // Retry the last message
-              const lastUserMessage = messages.findLast(msg => msg.role === 'user');
-              if (lastUserMessage) {
-                sendMessageMutation.mutate(lastUserMessage.content);
-              }
-            },
-          },
-        ]
-      );
-    } else if (
-      errorMessage.includes('timeout') ||
-      errorMessage.includes('zaman aşımı')
-    ) {
-      // Timeout error
-      Alert.alert(
-        'Zaman Aşımı',
-        'İstek zaman aşımına uğradı. Lütfen tekrar deneyin.',
-        [
-          { text: 'İptal', style: 'cancel' },
-          {
-            text: 'Tekrar Dene',
-            onPress: () => {
-              const lastUserMessage = messages.findLast(msg => msg.role === 'user');
-              if (lastUserMessage) {
-                sendMessageMutation.mutate(lastUserMessage.content);
-              }
-            },
-          },
-        ]
-      );
-    } else if (
-      errorMessage.includes('rate limit') ||
-      errorMessage.includes('yoğun')
-    ) {
-      // Rate limit error
-      Alert.alert(
-        'Sistem Yoğun',
-        'Sistem şu anda yoğun. Lütfen birkaç saniye bekleyip tekrar deneyin.',
-        [
-          { text: 'Tamam', style: 'cancel' },
-          {
-            text: 'Tekrar Dene',
-            onPress: () => {
-              setTimeout(() => {
-                const lastUserMessage = messages.findLast(msg => msg.role === 'user');
-                if (lastUserMessage) {
-                  sendMessageMutation.mutate(lastUserMessage.content);
-                }
-              }, 2000);
-            },
-          },
-        ]
+        [{ text: 'Tamam', style: 'cancel' }]
       );
     } else {
-      // Generic error
-      Alert.alert('Hata', errorMessage);
+      Alert.alert('Bilgi', errorMessage);
     }
   };
 
   const startStreaming = async (convId?: string) => {
     const activeConvId = convId || conversationId;
-    console.log('[Chat] Starting stream for conversation:', activeConvId);
-
     setIsStreaming(true);
     setStreamingContent('');
     streamingContentRef.current = '';
 
-    // Add temporary assistant message
     const tempMessage: Message = {
       id: `temp-${Date.now()}`,
       role: 'assistant',
@@ -252,50 +212,31 @@ export default function ChatScreen() {
 
     try {
       const token = await SecureStore.getItemAsync('accessToken');
-      if (!token) throw new Error('No access token');
+      if (!token) throw new Error('Oturum bulunamadı');
 
       const streamUrl = chatService.streamUrl(activeConvId);
 
-      console.log('[Chat] Stream URL:', streamUrl);
-
       await sseClient.current.stream(streamUrl, token, {
         onToken: (chunk) => {
-          console.log('[Chat] Token received, chunk length:', chunk.length, 'first 50 chars:', chunk.substring(0, 50));
           streamingContentRef.current += chunk;
-          console.log('[Chat] Total content length now:', streamingContentRef.current.length);
-          // Update streaming content immediately
           setStreamingContent(streamingContentRef.current);
-          console.log('[Chat] setStreamingContent called with length:', streamingContentRef.current.length);
         },
-        onDone: async (data) => {
-          console.log('[Chat] Stream done. Final content length:', streamingContentRef.current.length);
+        onDone: async () => {
           setIsStreaming(false);
-          // Replace temp message with final
           const finalContent = streamingContentRef.current;
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === tempMessage.id
-                ? {
-                  ...msg,
-                  content: finalContent,
-                  isStreaming: false,
-                }
+                ? { ...msg, content: finalContent, isStreaming: false }
                 : msg
             )
           );
           setStreamingContent('');
           streamingContentRef.current = '';
 
-          // Increment quota after successful message
-          try {
-            await incrementQuota();
-            console.log('[Chat] Quota incremented successfully');
-          } catch (error) {
-            console.error('[Chat] Failed to increment quota:', error);
-          }
-
-          // Log for verification
-          console.log('[Chat] Streaming completed, quota updated');
+          // Refresh live quota from server (stream already incremented UsageQuota)
+          queryClient.invalidateQueries({ queryKey: ['nova', 'quota'] });
+          refetchQuota();
         },
         onError: (error) => {
           setIsStreaming(false);
@@ -314,43 +255,41 @@ export default function ChatScreen() {
     }
   };
 
-  const handleSend = async () => {
-    if (!inputText.trim()) return;
+  const sendPrompt = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || sendMessageMutation.isPending || isStreaming) return;
 
-    // Check quota before sending (Requirements: 6.1, 6.2, 6.4, 6.5)
+    if (!isNovaEnabled) {
+      Alert.alert(
+        'NOVA Bakımda',
+        novaQuota?.maintenanceMessage || 'NOVA şu anda bakımdadır.'
+      );
+      return;
+    }
+
     if (isDepleted) {
-      // Show quota exceeded modal
       setShowQuotaExceeded(true);
       return;
     }
 
-    // Show warning if quota is low (Requirements: 6.3)
-    if (isLow && !isPremium) {
+    if (trimmed.length > maxMessageLength) {
       Alert.alert(
-        'Mesaj Kotası Azalıyor',
-        `Kalan mesaj kotanız: ${quota?.remaining || 0}. Premium'a geçerek sınırsız mesaj gönderin.`,
-        [
-          { text: 'Devam Et', style: 'default' },
-          {
-            text: 'Premium\'a Geç',
-            onPress: () => router.push('/premium' as any),
-          },
-        ]
+        'Karakter Limiti',
+        `Mesajınız en fazla ${maxMessageLength} karakter olabilir.`
       );
+      return;
     }
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       role: 'user',
-      content: inputText.trim(),
+      content: trimmed,
       createdAt: new Date().toISOString(),
     };
 
-    console.log('[Chat] Sending message:', userMessage.content);
     setMessages((prev) => [...prev, userMessage]);
     setInputText('');
-
-    sendMessageMutation.mutate(userMessage.content);
+    sendMessageMutation.mutate(trimmed);
   };
 
   const handleStop = () => {
@@ -365,26 +304,22 @@ export default function ChatScreen() {
 
   const handleForget = () => {
     Alert.alert(
-      'Sohbeti Sil',
-      'Tüm mesajlar ve bu sohbete ait hafıza silinecek. Emin misiniz?',
+      'Yeni Sohbet Başlat',
+      'Mevcut sohbet geçmişi temizlenecek. Emin misiniz?',
       [
         { text: 'İptal', style: 'cancel' },
         {
-          text: 'Sil',
+          text: 'Temizle',
           style: 'destructive',
           onPress: async () => {
             try {
               await chatService.forgetConversation(conversationId);
               setMessages([]);
-
-              // Create new conversation
               const newId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
               setConversationId(newId);
               await AsyncStorage.setItem('currentConversationId', newId);
-
-              Alert.alert('Başarılı', 'Sohbet silindi');
             } catch (error: any) {
-              Alert.alert('Hata', error.message || 'Silinemedi');
+              Alert.alert('Hata', error?.message || 'Temizlenemedi');
             }
           },
         },
@@ -392,22 +327,16 @@ export default function ChatScreen() {
     );
   };
 
-  // Update streaming message content
   useEffect(() => {
-    console.log('[Chat] useEffect - isStreaming:', isStreaming, 'streamingContent length:', streamingContent.length);
     if (isStreaming && streamingContent) {
-      setMessages((prev) => {
-        const updated = prev.map((msg) =>
+      setMessages((prev) =>
+        prev.map((msg) =>
           msg.isStreaming ? { ...msg, content: streamingContent } : msg
-        );
-        console.log('[Chat] Updated messages, streaming message content length:',
-          updated.find(m => m.isStreaming)?.content.length || 0);
-        return updated;
-      });
-      // Auto-scroll to bottom during streaming
+        )
+      );
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      }, 80);
     }
   }, [streamingContent, isStreaming]);
 
@@ -416,34 +345,50 @@ export default function ChatScreen() {
   const renderMessage = ({ item }: { item: Message }) => {
     const isUser = item.role === 'user';
 
-    // Debug log
-    if (!isUser && item.isStreaming) {
-      console.log('[Chat] Rendering streaming message, content length:', item.content.length);
+    if (isUser) {
+      return (
+        <View style={[styles.messageWrapper, styles.userWrapper]}>
+          <LinearGradient
+            colors={['#EC4899', '#8B5CF6']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.userBubble}
+          >
+            <Text style={styles.userMessageText}>{item.content}</Text>
+          </LinearGradient>
+        </View>
+      );
     }
 
     return (
-      <View
-        style={[
-          styles.messageContainer,
-          isUser ? styles.userMessage : styles.assistantMessage,
-        ]}
-      >
-        {!isUser && (
-          <Text style={styles.assistantLabel}>NOVA</Text>
-        )}
-        {item.content ? (
-          <Text style={[styles.messageText, isUser && styles.userMessageText]}>
-            {item.content}
-          </Text>
-        ) : item.isStreaming ? (
-          <View style={styles.typingIndicator}>
-            <ActivityIndicator size="small" color={theme.colors.primary} />
-            <Text style={styles.typingText}>Yazıyor...</Text>
-          </View>
-        ) : null}
+      <View style={[styles.messageWrapper, styles.assistantWrapper]}>
+        <LinearGradient
+          colors={['#EC4899', '#8B5CF6']}
+          style={styles.assistantAvatar}
+        >
+          <Ionicons name="sparkles" size={13} color="#FFFFFF" />
+        </LinearGradient>
+
+        <View style={styles.assistantBubble}>
+          {item.content ? (
+            <Text style={styles.messageText}>{item.content}</Text>
+          ) : item.isStreaming ? (
+            <View style={styles.typingIndicator}>
+              <ActivityIndicator size="small" color={theme.colors.primary} />
+              <Text style={styles.typingText}>NOVA yanıt hazırlıyor...</Text>
+            </View>
+          ) : null}
+        </View>
       </View>
     );
   };
+
+  const quotaPct = novaQuota ? Math.min(100, novaQuota.percentage) : 0;
+  const quotaBarColor = isDepleted
+    ? theme.colors.error
+    : isLow
+      ? '#F59E0B'
+      : theme.colors.primary;
 
   return (
     <View style={styles.safeArea}>
@@ -452,18 +397,119 @@ export default function ChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: insets.top }]}>
-          <View style={styles.headerLeft}>
-            <Text style={styles.headerTitle}>NOVA - AI Arkadaşın</Text>
-            <Text style={styles.headerSubtitle}>Yapay zeka destekli sağlık asistanınız</Text>
+        {/* Modern Header */}
+        <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+          <View style={styles.headerBrand}>
+            <LinearGradient
+              colors={['#EC4899', '#8B5CF6']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.headerAvatar}
+            >
+              <Ionicons name="sparkles" size={18} color="#FFFFFF" />
+            </LinearGradient>
+            <View>
+              <View style={styles.titleRow}>
+                <Text style={styles.headerTitle}>NOVA</Text>
+                {isPremium && (
+                  <View
+                    style={{
+                      backgroundColor: '#FEF3C7',
+                      paddingHorizontal: 7,
+                      paddingVertical: 2,
+                      borderRadius: 999,
+                    }}
+                  >
+                    <Text style={{ fontSize: 10, fontWeight: '800', color: '#B45309' }}>
+                      PRO HAFIZA
+                    </Text>
+                  </View>
+                )}
+                <View
+                  style={[
+                    styles.statusDot,
+                    { backgroundColor: isNovaEnabled ? '#10B981' : '#EF4444' },
+                  ]}
+                />
+              </View>
+              <Text style={styles.headerSubtitle}>
+                Kişisel kadın sağlığı asistanın
+              </Text>
+            </View>
           </View>
-          <TouchableOpacity onPress={handleForget} style={styles.forgetButton}>
-            <Text style={styles.forgetButtonText}>Sil</Text>
-          </TouchableOpacity>
+
+          <View style={styles.headerActions}>
+            {novaQuota && (
+              <TouchableOpacity
+                style={[
+                  styles.quotaBadge,
+                  isDepleted && styles.quotaBadgeDepleted,
+                  isLow && styles.quotaBadgeLow,
+                ]}
+                onPress={() => {
+                  if (!isPremium) {
+                    router.push('/premium' as any);
+                  } else {
+                    Alert.alert(
+                      'Aylık NOVA Kotası',
+                      `Kullanılan: ${novaQuota.used} / ${novaQuota.limit}\nKalan: ${novaQuota.remaining} mesaj\nMaks. uzunluk: ${novaQuota.maxMessageLength} karakter`
+                    );
+                  }
+                }}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name="flash-outline"
+                  size={13}
+                  color={isDepleted ? '#EF4444' : isLow ? '#D97706' : theme.colors.primary}
+                />
+                <Text
+                  style={[
+                    styles.quotaBadgeText,
+                    isDepleted && { color: '#EF4444' },
+                    isLow && { color: '#D97706' },
+                  ]}
+                >
+                  {novaQuota.remaining}/{novaQuota.limit}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {messages.length > 0 && (
+              <TouchableOpacity
+                onPress={handleForget}
+                style={styles.clearButton}
+                activeOpacity={0.75}
+              >
+                <Ionicons name="trash-outline" size={18} color={theme.colors.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
-        {/* Messages list */}
+        {/* Thin Quota Progress Strip */}
+        {novaQuota && (
+          <View style={styles.quotaBarTrack}>
+            <View
+              style={[
+                styles.quotaBarFill,
+                { width: `${quotaPct}%`, backgroundColor: quotaBarColor },
+              ]}
+            />
+          </View>
+        )}
+
+        {/* Maintenance Banner if disabled from Admin Panel */}
+        {!isNovaEnabled && (
+          <View style={styles.maintenanceBanner}>
+            <Ionicons name="construct-outline" size={16} color="#B45309" />
+            <Text style={styles.maintenanceText}>
+              {novaQuota?.maintenanceMessage || 'NOVA şu anda bakımdadır.'}
+            </Text>
+          </View>
+        )}
+
+        {/* Messages */}
         <FlatList
           ref={flatListRef}
           data={messages}
@@ -471,263 +517,496 @@ export default function ChatScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={[
             styles.messagesList,
-            messages.length === 0 && { flex: 1 }
+            messages.length === 0 && { flexGrow: 1 },
           ]}
           onContentSizeChange={() => {
             if (messages.length > 0) {
               flatListRef.current?.scrollToEnd({ animated: true });
             }
           }}
-          onLayout={() => {
-            if (messages.length > 0) {
-              flatListRef.current?.scrollToEnd({ animated: false });
-            }
-          }}
           ListEmptyComponent={() => (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyStateTitle}>👋 Merhaba!</Text>
-              <Text style={styles.emptyStateText}>
-                Ben NOVA, senin kişisel sağlık asistanınım. Regl döngün,
-                hamilelik, su tüketimi veya genel sağlığınla ilgili her konuda
-                yardımcı olabilirim.
+              <LinearGradient
+                colors={['#EC4899', '#8B5CF6']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.emptyOrb}
+              >
+                <Ionicons name="sparkles" size={32} color="#FFFFFF" />
+              </LinearGradient>
+
+              <Text style={styles.emptyTitle}>Merhaba, ben NOVA</Text>
+              <Text style={styles.emptySubtitle}>
+                {novaQuota?.systemGreeting ||
+                  'Döngün, hamilelik sürecin, su tüketimin veya günlük wellness hedeflerin hakkında bana her şeyi sorabilirsin.'}
               </Text>
-              <Text style={styles.emptyStateText}>
-                Bugün sana nasıl yardımcı olabilirim?
-              </Text>
+
+              <View style={styles.promptsGrid}>
+                {SUGGESTED_PROMPTS.map((p) => (
+                  <TouchableOpacity
+                    key={p.text}
+                    style={styles.promptChip}
+                    onPress={() => sendPrompt(p.text)}
+                    activeOpacity={0.8}
+                  >
+                    <View
+                      style={[
+                        styles.promptIconBox,
+                        { backgroundColor: `${p.color}18` },
+                      ]}
+                    >
+                      <Ionicons name={p.icon} size={16} color={p.color} />
+                    </View>
+                    <Text style={styles.promptText}>{p.text}</Text>
+                    <Ionicons
+                      name="arrow-forward"
+                      size={14}
+                      color={theme.colors.textLight}
+                    />
+                  </TouchableOpacity>
+                ))}
+
+                <TouchableOpacity
+                  style={[
+                    styles.promptChip,
+                    { borderColor: '#F59E0B', backgroundColor: 'rgba(245, 158, 11, 0.08)' },
+                  ]}
+                  onPress={() => {
+                    if (!isPremium) {
+                      setShowDoctorCoachUpgrade(true);
+                      return;
+                    }
+                    sendPrompt(
+                      'Son 14 günlük semptom ve döngü geçmişime bakarak doktor/jinekolog randevumda sormam gereken en önemli 5 soruyu ve bugüne özel bakım planımı hazırla.',
+                    );
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <View
+                    style={[
+                      styles.promptIconBox,
+                      { backgroundColor: 'rgba(245, 158, 11, 0.18)' },
+                    ]}
+                  >
+                    <Ionicons name="medkit-outline" size={16} color="#D97706" />
+                  </View>
+                  <Text style={styles.promptText}>
+                    Doktor Randevusu Soru Listesi & Faz Planım {!isPremium ? '👑' : ''}
+                  </Text>
+                  <Ionicons
+                    name={isPremium ? 'arrow-forward' : 'lock-closed-outline'}
+                    size={14}
+                    color="#D97706"
+                  />
+                </TouchableOpacity>
+              </View>
             </View>
           )}
         />
 
-        {/* Input area - Fixed at bottom above tab bar */}
-        <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom + 60, 12) }]}>
-          {isStreaming ? (
-            <TouchableOpacity style={styles.stopButton} onPress={handleStop}>
-              <Text style={styles.stopButtonText}>⏹ Durdur</Text>
-            </TouchableOpacity>
-          ) : (
-            <>
-              <TextInput
-                style={styles.input}
-                placeholder="Mesajınızı yazın..."
-                placeholderTextColor={theme.colors.textLight}
-                value={inputText}
-                onChangeText={setInputText}
-                multiline
-                maxLength={500}
-              />
-              <TouchableOpacity
-                style={[
-                  styles.sendButton,
-                  (!inputText.trim() || sendMessageMutation.isPending) &&
-                  styles.sendButtonDisabled,
-                ]}
-                onPress={handleSend}
-                disabled={!inputText.trim() || sendMessageMutation.isPending}
-              >
-                {sendMessageMutation.isPending ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.sendButtonText}>↑</Text>
-                )}
-              </TouchableOpacity>
-            </>
+        {/* Floating Input Bar */}
+        <View
+          style={[
+            styles.inputWrapper,
+            { paddingBottom: Math.max(insets.bottom + 64, 72) },
+          ]}
+        >
+          {inputText.length > maxMessageLength * 0.75 && (
+            <Text style={styles.charCount}>
+              {inputText.length}/{maxMessageLength}
+            </Text>
           )}
+
+          <View style={styles.inputRow}>
+            {isStreaming ? (
+              <TouchableOpacity
+                style={styles.stopButton}
+                onPress={handleStop}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="stop-circle-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.stopButtonText}>Yanıtı Durdur</Text>
+              </TouchableOpacity>
+            ) : (
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder={
+                    isNovaEnabled
+                      ? 'NOVA’ya bir soru sor...'
+                      : 'NOVA şu anda bakımda'
+                  }
+                  placeholderTextColor={theme.colors.textLight}
+                  value={inputText}
+                  onChangeText={setInputText}
+                  multiline
+                  editable={isNovaEnabled}
+                  maxLength={maxMessageLength}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.sendButton,
+                    (!inputText.trim() ||
+                      sendMessageMutation.isPending ||
+                      !isNovaEnabled) &&
+                      styles.sendButtonDisabled,
+                  ]}
+                  onPress={() => sendPrompt(inputText)}
+                  disabled={
+                    !inputText.trim() ||
+                    sendMessageMutation.isPending ||
+                    !isNovaEnabled
+                  }
+                  activeOpacity={0.85}
+                >
+                  {sendMessageMutation.isPending ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Ionicons name="arrow-up" size={18} color="#FFFFFF" />
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
         </View>
       </KeyboardAvoidingView>
 
-      {/* Upgrade Prompt Modal */}
       <UpgradePrompt
         visible={showUpgradePrompt}
         onClose={() => setShowUpgradePrompt(false)}
-        feature="Sınırsız AI Mesajları"
-        description="Mesaj kotanız doldu. Premium'a geçerek sınırsız mesaj gönderin ve gelişmiş AI özelliklerinden yararlanın."
+        feature="Yüksek NOVA Mesaj Limiti"
+        description="Aylık mesaj kotanız doldu. Premium'a geçerek çok daha yüksek aylık NOVA mesaj limitine ulaşabilirsiniz."
       />
 
-      {/* Quota Exceeded Modal */}
+      <UpgradePrompt
+        visible={showDoctorCoachUpgrade}
+        onClose={() => setShowDoctorCoachUpgrade(false)}
+        feature="Doktor Soru Listesi & Pro Hafıza"
+        description="Son 14 günlük semptom ve döngü verilerine özel doktor randevusu soru listesi ile faz bakım planını Premium ile oluştur."
+      />
+
       <QuotaExceededModal
         visible={showQuotaExceeded}
         onClose={() => setShowQuotaExceeded(false)}
-        quota={quota}
+        quota={
+          novaQuota
+            ? {
+                used: novaQuota.used,
+                limit: novaQuota.limit,
+                remaining: novaQuota.remaining,
+                resetDate: novaQuota.resetsAt,
+                percentage: novaQuota.percentage,
+              }
+            : undefined
+        }
         isPremium={isPremium}
       />
     </View>
   );
 }
 
-const createStyles = (theme: ReturnType<typeof useTheme>) => StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
-  container: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: theme.spacing.md,
-    backgroundColor: theme.colors.backgroundCard,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
-  },
-  headerLeft: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: theme.colors.text,
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    color: theme.colors.textSecondary,
-    marginTop: 2,
-  },
-  forgetButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: theme.colors.error,
-  },
-  forgetButtonText: {
-    color: theme.colors.textOnPrimary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  messagesList: {
-    padding: 16,
-    paddingBottom: 140, // Space for input area + tab bar
-    flexGrow: 1,
-  },
-  messageContainer: {
-    marginBottom: theme.spacing.md,
-    maxWidth: '80%',
-  },
-  userMessage: {
-    alignSelf: 'flex-end',
-    backgroundColor: theme.colors.primary,
-    borderRadius: 20,
-    borderBottomRightRadius: 4,
-    padding: 14,
-    shadowColor: theme.card.shadowColor,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  assistantMessage: {
-    alignSelf: 'flex-start',
-    backgroundColor: theme.colors.backgroundCard,
-    borderRadius: 20,
-    borderBottomLeftRadius: 4,
-    padding: 14,
-    shadowColor: theme.card.shadowColor,
-    shadowOffset: theme.card.shadowOffset,
-    shadowOpacity: theme.card.shadowOpacity,
-    shadowRadius: theme.card.shadowRadius,
-    elevation: theme.card.elevation,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  assistantLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: theme.colors.primary,
-    marginBottom: 4,
-  },
-  messageText: {
-    fontSize: 16,
-    lineHeight: 22,
-    color: theme.colors.text,
-  },
-  userMessageText: {
-    color: theme.colors.textOnPrimary,
-  },
-  typingIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  typingText: {
-    fontSize: 14,
-    color: theme.colors.textSecondary,
-    fontStyle: 'italic',
-  },
-  inputContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    padding: 12,
-    backgroundColor: theme.colors.backgroundCard,
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-    alignItems: 'center',
-  },
-  input: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    fontSize: 16,
-    maxHeight: 100,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    color: theme.colors.text,
-  },
-  sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: theme.colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 8,
-    shadowColor: theme.button.shadowColor,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  sendButtonDisabled: {
-    backgroundColor: theme.colors.textLight,
-  },
-  sendButtonText: {
-    color: theme.colors.textOnPrimary,
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  stopButton: {
-    flex: 1,
-    backgroundColor: theme.colors.error,
-    borderRadius: 20,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  stopButtonText: {
-    color: theme.colors.textOnPrimary,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'flex-start',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-    paddingTop: 80,
-  },
-  emptyStateTitle: {
-    fontSize: 32,
-    marginBottom: 16,
-  },
-  emptyStateText: {
-    fontSize: 16,
-    color: theme.colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: 12,
-    lineHeight: 24,
-  },
-});
+const createStyles = (theme: ReturnType<typeof useTheme>) =>
+  StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    container: {
+      flex: 1,
+    },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingBottom: 12,
+      backgroundColor: theme.colors.backgroundCard,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+      gap: 10,
+    },
+    headerBrand: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      flex: 1,
+    },
+    headerAvatar: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    headerTitle: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: theme.colors.text,
+      letterSpacing: -0.2,
+    },
+    statusDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 3.5,
+    },
+    headerSubtitle: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      marginTop: 1,
+    },
+    headerActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    quotaBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: theme.colors.backgroundSecondary,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 14,
+    },
+    quotaBadgeLow: {
+      backgroundColor: 'rgba(245, 158, 11, 0.12)',
+      borderColor: 'rgba(245, 158, 11, 0.35)',
+    },
+    quotaBadgeDepleted: {
+      backgroundColor: 'rgba(239, 68, 68, 0.12)',
+      borderColor: 'rgba(239, 68, 68, 0.35)',
+    },
+    quotaBadgeText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: theme.colors.primary,
+    },
+    clearButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      backgroundColor: theme.colors.background,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    quotaBarTrack: {
+      height: 2.5,
+      width: '100%',
+      backgroundColor: theme.colors.border,
+    },
+    quotaBarFill: {
+      height: '100%',
+    },
+    maintenanceBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: 'rgba(245, 158, 11, 0.14)',
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(245, 158, 11, 0.25)',
+    },
+    maintenanceText: {
+      flex: 1,
+      fontSize: 12.5,
+      fontWeight: '600',
+      color: '#B45309',
+    },
+    messagesList: {
+      paddingHorizontal: 16,
+      paddingTop: 14,
+      paddingBottom: 170,
+    },
+    messageWrapper: {
+      marginBottom: 12,
+      flexDirection: 'row',
+    },
+    userWrapper: {
+      justifyContent: 'flex-end',
+    },
+    assistantWrapper: {
+      justifyContent: 'flex-start',
+      alignItems: 'flex-end',
+      gap: 8,
+    },
+    assistantAvatar: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginBottom: 2,
+    },
+    userBubble: {
+      maxWidth: '80%',
+      borderRadius: 20,
+      borderBottomRightRadius: 6,
+      paddingHorizontal: 15,
+      paddingVertical: 11,
+    },
+    assistantBubble: {
+      maxWidth: '82%',
+      backgroundColor: theme.colors.backgroundCard,
+      borderRadius: 20,
+      borderBottomLeftRadius: 6,
+      paddingHorizontal: 15,
+      paddingVertical: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    messageText: {
+      fontSize: 15,
+      lineHeight: 22,
+      color: theme.colors.text,
+    },
+    userMessageText: {
+      fontSize: 15,
+      lineHeight: 22,
+      color: '#FFFFFF',
+      fontWeight: '500',
+    },
+    typingIndicator: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    typingText: {
+      fontSize: 13.5,
+      color: theme.colors.textSecondary,
+      fontStyle: 'italic',
+    },
+    emptyState: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingBottom: 40,
+      gap: 10,
+    },
+    emptyOrb: {
+      width: 68,
+      height: 68,
+      borderRadius: 34,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginBottom: 4,
+      shadowColor: '#EC4899',
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.25,
+      shadowRadius: 12,
+      elevation: 6,
+    },
+    emptyTitle: {
+      fontSize: 22,
+      fontWeight: '800',
+      color: theme.colors.text,
+    },
+    emptySubtitle: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      lineHeight: 20,
+      paddingHorizontal: 10,
+      marginBottom: 8,
+    },
+    promptsGrid: {
+      width: '100%',
+      gap: 8,
+    },
+    promptChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: theme.colors.backgroundCard,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 16,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
+    promptIconBox: {
+      width: 30,
+      height: 30,
+      borderRadius: 10,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    promptText: {
+      flex: 1,
+      fontSize: 13.5,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    inputWrapper: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      paddingHorizontal: 14,
+      paddingTop: 10,
+      backgroundColor: theme.colors.backgroundCard,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+    },
+    charCount: {
+      fontSize: 11,
+      color: theme.colors.textLight,
+      textAlign: 'right',
+      marginBottom: 4,
+      marginRight: 6,
+    },
+    inputRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: 8,
+    },
+    input: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+      borderRadius: 20,
+      paddingHorizontal: 15,
+      paddingVertical: 10,
+      fontSize: 15,
+      maxHeight: 110,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      color: theme.colors.text,
+    },
+    sendButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: theme.colors.primary,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    sendButtonDisabled: {
+      backgroundColor: theme.colors.textLight,
+      opacity: 0.6,
+    },
+    stopButton: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      backgroundColor: theme.colors.error,
+      borderRadius: 20,
+      paddingVertical: 11,
+    },
+    stopButtonText: {
+      color: '#FFFFFF',
+      fontSize: 14.5,
+      fontWeight: '700',
+    },
+  });

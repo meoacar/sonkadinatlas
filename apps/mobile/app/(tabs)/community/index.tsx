@@ -13,34 +13,48 @@ import { useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
+import { useFeatureFlags } from '@/hooks/useFeatureFlags';
 import { useInfiniteQuestions, useQuestions, useFavoriteQuestions } from '@/hooks/useQna';
 import { useQnaStore } from '@/store/qnaStore';
-import { QuestionCard, QuestionListSkeleton, ErrorState, EmptyState, OfflineBanner } from '@/components/qna';
+import {
+    QuestionCard,
+    QuestionListSkeleton,
+    ErrorState,
+    EmptyState,
+    OfflineBanner,
+    CategoryPill,
+} from '@/components/qna';
 import { QuestionCategory, QuestionStatus, Question } from '@/types/qna';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 
-const SORT_OPTIONS = [
+type SortTab = 'recent' | 'popular' | 'unanswered' | 'favorites';
+
+const SORT_OPTIONS: ReadonlyArray<{
+    value: SortTab;
+    label: string;
+    icon: keyof typeof Ionicons.glyphMap;
+}> = [
     { value: 'recent', label: 'En Yeni', icon: 'time-outline' },
     { value: 'popular', label: 'Popüler', icon: 'flame-outline' },
-    { value: 'unanswered', label: 'Cevaplanmamış', icon: 'help-circle-outline' },
-    { value: 'favorites', label: 'Favorilerim', icon: 'heart-outline' },
-] as const;
-
-const CATEGORIES = [
-    { value: undefined, label: 'Tümü', icon: '📋' },
-    { value: QuestionCategory.MENSTRUAL_HEALTH, label: 'Adet', icon: '🩸' },
-    { value: QuestionCategory.PREGNANCY, label: 'Hamilelik', icon: '🤰' },
-    { value: QuestionCategory.FERTILITY, label: 'Doğurganlık', icon: '🌸' },
-    { value: QuestionCategory.NUTRITION, label: 'Beslenme', icon: '🥗' },
-    { value: QuestionCategory.EXERCISE, label: 'Egzersiz', icon: '💪' },
-    { value: QuestionCategory.MENTAL_HEALTH, label: 'Ruh Sağlığı', icon: '🧠' },
-    { value: QuestionCategory.GENERAL, label: 'Genel', icon: '💬' },
+    { value: 'unanswered', label: 'Cevapsız', icon: 'help-circle-outline' },
+    { value: 'favorites', label: 'Favoriler', icon: 'heart-outline' },
 ];
 
-const STATUS_FILTERS = [
-    { value: undefined, label: 'Tümü' },
-    { value: QuestionStatus.OPEN, label: 'Açık' },
-    { value: QuestionStatus.ANSWERED, label: 'Cevaplanmış' },
+const CATEGORIES: ReadonlyArray<{
+    value?: QuestionCategory;
+    label: string;
+    icon: keyof typeof Ionicons.glyphMap;
+}> = [
+    { value: undefined, label: 'Tümü', icon: 'sparkles-outline' },
+    { value: QuestionCategory.MENSTRUAL_HEALTH, label: 'Adet', icon: 'water-outline' },
+    { value: QuestionCategory.PREGNANCY, label: 'Hamilelik', icon: 'heart-outline' },
+    { value: QuestionCategory.FERTILITY, label: 'Doğurganlık', icon: 'flower-outline' },
+    { value: QuestionCategory.NUTRITION, label: 'Beslenme', icon: 'nutrition-outline' },
+    { value: QuestionCategory.EXERCISE, label: 'Egzersiz', icon: 'fitness-outline' },
+    { value: QuestionCategory.MENTAL_HEALTH, label: 'Ruh Sağlığı', icon: 'leaf-outline' },
+    { value: QuestionCategory.SLEEP, label: 'Uyku', icon: 'moon-outline' },
+    { value: QuestionCategory.PMS, label: 'PMS', icon: 'pulse-outline' },
+    { value: QuestionCategory.GENERAL, label: 'Genel', icon: 'chatbubbles-outline' },
 ];
 
 export default function CommunityIndexScreen() {
@@ -48,37 +62,35 @@ export default function CommunityIndexScreen() {
     const router = useRouter();
     const styles = createStyles(theme);
     const { isConnected } = useNetworkStatus();
+    const { flags } = useFeatureFlags();
 
-    // Store state
     const {
         filters,
-        setFilters,
         searchQuery,
-        setSearchQuery,
         sortBy,
         setSortBy,
         selectedCategory,
         setSelectedCategory,
-        getActiveFiltersCount,
     } = useQnaStore();
 
-    // Local UI state
-    const [showFilters, setShowFilters] = useState(false);
-    const [selectedStatus, setSelectedStatus] = useState<QuestionStatus | undefined>(filters.status);
+    const [activeSortTab, setActiveSortTab] = useState<SortTab>(sortBy);
+    const [selectedStatus, setSelectedStatus] = useState<QuestionStatus | undefined>(
+        filters.status
+    );
 
-    // Check if showing favorites
-    const showingFavorites = sortBy === 'favorites';
+    const showingFavorites = activeSortTab === 'favorites';
 
-    // Build query filters (exclude 'favorites' from sort as it's a separate endpoint)
-    const queryFilters = useMemo(() => ({
-        category: selectedCategory,
-        status: selectedStatus,
-        sort: showingFavorites ? 'recent' : sortBy, // Use 'recent' as fallback for favorites
-        search: searchQuery,
-        limit: 10,
-    }), [selectedCategory, selectedStatus, sortBy, searchQuery, showingFavorites]);
+    const queryFilters = useMemo(
+        () => ({
+            category: selectedCategory,
+            status: selectedStatus,
+            sort: showingFavorites ? 'recent' : activeSortTab,
+            search: searchQuery,
+            limit: 12,
+        }),
+        [selectedCategory, selectedStatus, activeSortTab, searchQuery, showingFavorites]
+    );
 
-    // Fetch questions with infinite scroll (skip if showing favorites)
     const {
         data,
         fetchNextPage,
@@ -89,10 +101,9 @@ export default function CommunityIndexScreen() {
         refetch,
         isRefetching,
     } = useInfiniteQuestions(queryFilters, {
-        enabled: !showingFavorites, // Disable when showing favorites
+        enabled: !showingFavorites,
     });
 
-    // Fetch favorite questions separately
     const {
         data: favoritesData,
         isLoading: favoritesLoading,
@@ -100,10 +111,9 @@ export default function CommunityIndexScreen() {
         refetch: refetchFavorites,
         isRefetching: isRefetchingFavorites,
     } = useFavoriteQuestions(1, 50, {
-        enabled: showingFavorites, // Only fetch when showing favorites
+        enabled: showingFavorites,
     });
 
-    // Flatten paginated data
     const questions = useMemo(() => {
         if (showingFavorites) {
             return favoritesData?.questions || [];
@@ -111,329 +121,323 @@ export default function CommunityIndexScreen() {
         return data?.pages.flatMap((page) => page.questions) || [];
     }, [data, favoritesData, showingFavorites]);
 
-    // Popular questions widget - always fetch to maintain hooks order
-    const shouldShowWidget = !searchQuery && !selectedCategory && !selectedStatus;
+    const shouldShowSpotlight =
+        !showingFavorites &&
+        !searchQuery &&
+        !selectedCategory &&
+        !selectedStatus &&
+        activeSortTab === 'recent';
 
-    // Always call the hook to maintain hooks order
     const popularQuestionsQuery = useQuestions(
         {
             sort: 'popular',
             limit: 5,
         },
         {
-            staleTime: 10 * 60 * 1000, // 10 minutes
-            enabled: shouldShowWidget, // Only fetch when needed
+            staleTime: 10 * 60 * 1000,
+            enabled: shouldShowSpotlight,
         }
     );
 
-    // Handle load more
+    const spotlightQuestions = popularQuestionsQuery.data?.questions || [];
+
     const handleLoadMore = useCallback(() => {
-        if (hasNextPage && !isFetchingNextPage) {
+        if (!showingFavorites && hasNextPage && !isFetchingNextPage) {
             fetchNextPage();
         }
-    }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+    }, [showingFavorites, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-    // Handle refresh
     const handleRefresh = useCallback(() => {
         if (showingFavorites) {
             refetchFavorites();
         } else {
             refetch();
         }
-        // Also refetch popular questions widget
-        if (shouldShowWidget) {
+        if (shouldShowSpotlight) {
             popularQuestionsQuery.refetch();
         }
-    }, [refetch, refetchFavorites, showingFavorites, shouldShowWidget, popularQuestionsQuery]);
+    }, [refetch, refetchFavorites, showingFavorites, shouldShowSpotlight, popularQuestionsQuery]);
 
-    // Handle question press
-    const handleQuestionPress = useCallback((question: Question) => {
-        router.push({
-            pathname: '/(tabs)/community/[id]' as any,
-            params: { id: question.id },
-        });
-    }, [router]);
+    const handleQuestionPress = useCallback(
+        (question: Question) => {
+            router.push({
+                pathname: '/(tabs)/community/[id]' as any,
+                params: { id: question.id },
+            });
+        },
+        [router]
+    );
 
-    // Handle ask question
     const handleAskQuestion = useCallback(() => {
         router.push('/(tabs)/community/ask' as any);
     }, [router]);
 
-    // Handle sort change
-    const handleSortChange = useCallback((sort: typeof sortBy) => {
-        setSortBy(sort);
-    }, [setSortBy]);
+    const handleSortChange = useCallback(
+        (tab: SortTab) => {
+            setActiveSortTab(tab);
+            if (tab !== 'favorites') {
+                setSortBy(tab);
+            }
+        },
+        [setSortBy]
+    );
 
-    // Handle category change
-    const handleCategoryChange = useCallback((category?: QuestionCategory) => {
-        setSelectedCategory(category);
-    }, [setSelectedCategory]);
+    const handleCategoryChange = useCallback(
+        (category?: QuestionCategory) => {
+            setSelectedCategory(category);
+        },
+        [setSelectedCategory]
+    );
 
-    // Handle status change
-    const handleStatusChange = useCallback((status?: QuestionStatus) => {
-        setSelectedStatus(status);
-        setFilters({ status });
-    }, [setFilters]);
+    const currentIsLoading = showingFavorites ? favoritesLoading : isLoading;
+    const currentIsError = showingFavorites ? favoritesError : isError;
+    const currentIsRefreshing = showingFavorites ? isRefetchingFavorites : isRefetching;
 
-    // Handle notification settings
-    const handleNotificationSettings = useCallback(() => {
-        router.push('/(tabs)/community/notification-preferences' as any);
-    }, [router]);
-
-    // Render header
-    const renderHeader = useCallback(() => (
-        <View style={styles.header}>
-            <View style={styles.headerTop}>
-                <View style={styles.headerTitleContainer}>
-                    <Text style={styles.headerTitle}>Topluluk</Text>
-                    <Text style={styles.headerSubtitle}>
-                        {questions.length} soru
-                    </Text>
-                </View>
-                <View style={styles.headerActions}>
-                    <TouchableOpacity
-                        style={styles.notificationButton}
-                        onPress={handleNotificationSettings}
-                        activeOpacity={0.7}
-                    >
-                        <Text style={{ fontSize: 22 }}>🔔</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={styles.askButton}
-                        onPress={handleAskQuestion}
-                        activeOpacity={0.8}
-                    >
-                        <Text style={{ fontSize: 20, color: '#fff' }}>➕</Text>
-                        <Text style={styles.askButtonText}>Soru Sor</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-
-            {/* Search Bar */}
-            <TouchableOpacity
-                style={styles.searchContainer}
-                onPress={() => router.push('/(tabs)/community/search' as any)}
-                activeOpacity={0.7}
-            >
-                <Text style={{ fontSize: 18 }}>🔍</Text>
-                <Text style={styles.searchPlaceholder}>Soru ara...</Text>
-            </TouchableOpacity>
-
-            {/* Sort Options */}
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.sortContainer}
-                contentContainerStyle={styles.sortContent}
-            >
-                {SORT_OPTIONS.map((option) => (
-                    <TouchableOpacity
-                        key={option.value}
-                        style={[
-                            styles.sortChip,
-                            sortBy === option.value && styles.sortChipActive,
-                        ]}
-                        onPress={() => handleSortChange(option.value)}
-                        activeOpacity={0.7}
-                    >
-                        <Text style={{ fontSize: 16 }}>
-                            {option.value === 'recent' ? '🕐' :
-                                option.value === 'popular' ? '🔥' :
-                                    option.value === 'favorites' ? '❤️' : '❓'}
+    const renderHeader = useCallback(
+        () => (
+            <View style={styles.header}>
+                {/* Title Row */}
+                <View style={styles.headerTop}>
+                    <View style={styles.headerTitleContainer}>
+                        <Text style={styles.headerTitle}>Topluluk</Text>
+                        <Text style={styles.headerSubtitle}>
+                            Kadın sağlığı soru & deneyim alanı
                         </Text>
-                        <Text
-                            style={[
-                                styles.sortChipText,
-                                sortBy === option.value && styles.sortChipTextActive,
-                            ]}
+                    </View>
+
+                    <View style={styles.headerActions}>
+                        <TouchableOpacity
+                            style={styles.iconButton}
+                            onPress={() => router.push('/(tabs)/community/my-questions' as any)}
+                            activeOpacity={0.75}
                         >
-                            {option.label}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
+                            <Ionicons name="person-outline" size={19} color={theme.colors.text} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.iconButton}
+                            onPress={() =>
+                                router.push('/(tabs)/community/notification-preferences' as any)
+                            }
+                            activeOpacity={0.75}
+                        >
+                            <Ionicons
+                                name="notifications-outline"
+                                size={19}
+                                color={theme.colors.text}
+                            />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.askButton}
+                            onPress={handleAskQuestion}
+                            activeOpacity={0.85}
+                        >
+                            <Ionicons name="add" size={18} color="#FFFFFF" />
+                            <Text style={styles.askButtonText}>Soru Sor</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+
+                {/* Search Trigger */}
                 <TouchableOpacity
-                    style={[
-                        styles.filterButton,
-                        getActiveFiltersCount() > 0 && styles.filterButtonActive,
-                    ]}
-                    onPress={() => setShowFilters(!showFilters)}
-                    activeOpacity={0.7}
+                    style={styles.searchBar}
+                    onPress={() => router.push('/(tabs)/community/search' as any)}
+                    activeOpacity={0.8}
                 >
-                    <Text style={{ fontSize: 16 }}>🔽</Text>
-                    <Text
-                        style={[
-                            styles.filterButtonText,
-                            getActiveFiltersCount() > 0 && styles.filterButtonTextActive,
-                        ]}
-                    >
-                        Filtrele
+                    <Ionicons name="search-outline" size={18} color={theme.colors.textLight} />
+                    <Text style={styles.searchPlaceholder}>
+                        Soru, konu veya etiket ara...
                     </Text>
-                    {getActiveFiltersCount() > 0 && (
-                        <View style={styles.filterBadge}>
-                            <Text style={styles.filterBadgeText}>{getActiveFiltersCount()}</Text>
-                        </View>
-                    )}
+                    <Ionicons name="options-outline" size={17} color={theme.colors.textLight} />
                 </TouchableOpacity>
-            </ScrollView>
 
-            {/* Filters Panel */}
-            {showFilters && (
-                <View style={styles.filtersPanel}>
-                    {/* Categories */}
-                    <View style={styles.filterSection}>
-                        <Text style={styles.filterSectionTitle}>Kategori</Text>
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.filterChipsContainer}
-                        >
-                            {CATEGORIES.map((cat) => (
+                {/* Sort Pills */}
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.sortScroll}
+                >
+                    {SORT_OPTIONS.map((option) => {
+                        const isActive = activeSortTab === option.value;
+                        return (
+                            <TouchableOpacity
+                                key={option.value}
+                                style={[styles.sortChip, isActive && styles.sortChipActive]}
+                                onPress={() => handleSortChange(option.value)}
+                                activeOpacity={0.8}
+                            >
+                                <Ionicons
+                                    name={option.icon}
+                                    size={14}
+                                    color={isActive ? '#FFFFFF' : theme.colors.textSecondary}
+                                />
+                                <Text
+                                    style={[
+                                        styles.sortChipText,
+                                        isActive && styles.sortChipTextActive,
+                                    ]}
+                                >
+                                    {option.label}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </ScrollView>
+
+                {/* Direct Category Chips */}
+                {!showingFavorites && (
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.categoriesScroll}
+                    >
+                        {CATEGORIES.map((cat) => {
+                            const isSelected = selectedCategory === cat.value;
+                            return (
                                 <TouchableOpacity
                                     key={cat.label}
                                     style={[
-                                        styles.categoryFilterChip,
-                                        selectedCategory === cat.value && styles.categoryFilterChipActive,
+                                        styles.categoryChip,
+                                        isSelected && styles.categoryChipActive,
                                     ]}
                                     onPress={() => handleCategoryChange(cat.value)}
-                                    activeOpacity={0.7}
+                                    activeOpacity={0.75}
                                 >
-                                    <Text style={styles.categoryIcon}>{cat.icon}</Text>
+                                    <Ionicons
+                                        name={cat.icon}
+                                        size={13}
+                                        color={
+                                            isSelected ? theme.colors.primary : theme.colors.textLight
+                                        }
+                                    />
                                     <Text
                                         style={[
-                                            styles.categoryFilterText,
-                                            selectedCategory === cat.value && styles.categoryFilterTextActive,
+                                            styles.categoryChipText,
+                                            isSelected && styles.categoryChipTextActive,
                                         ]}
                                     >
                                         {cat.label}
                                     </Text>
                                 </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
+                )}
+
+                {/* Spotlight Carousel */}
+                {shouldShowSpotlight && spotlightQuestions.length > 0 && (
+                    <View style={styles.spotlightSection}>
+                        <View style={styles.spotlightHeader}>
+                            <View style={styles.spotlightTitleRow}>
+                                <Ionicons name="flame" size={16} color="#F97316" />
+                                <Text style={styles.spotlightHeading}>Öne Çıkan Tartışmalar</Text>
+                            </View>
+                            <TouchableOpacity
+                                onPress={() => handleSortChange('popular')}
+                                activeOpacity={0.7}
+                            >
+                                <Text style={styles.seeAllText}>Tümü</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.spotlightScroll}
+                        >
+                            {spotlightQuestions.slice(0, 5).map((q) => (
+                                <TouchableOpacity
+                                    key={q.id}
+                                    style={styles.spotlightCard}
+                                    onPress={() => handleQuestionPress(q)}
+                                    activeOpacity={0.85}
+                                >
+                                    <CategoryPill category={q.category} size="small" />
+                                    <Text style={styles.spotlightCardTitle} numberOfLines={2}>
+                                        {q.title}
+                                    </Text>
+                                    <View style={styles.spotlightCardFooter}>
+                                        <View style={styles.spotlightStat}>
+                                            <Ionicons
+                                                name="chatbubble-outline"
+                                                size={12}
+                                                color={theme.colors.textSecondary}
+                                            />
+                                            <Text style={styles.spotlightStatText}>
+                                                {q._count?.answers || 0}
+                                            </Text>
+                                        </View>
+                                        <View style={styles.spotlightStat}>
+                                            <Ionicons
+                                                name="eye-outline"
+                                                size={12}
+                                                color={theme.colors.textSecondary}
+                                            />
+                                            <Text style={styles.spotlightStatText}>
+                                                {q.viewCount}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                </TouchableOpacity>
                             ))}
                         </ScrollView>
                     </View>
+                )}
 
-                    {/* Status */}
-                    <View style={styles.filterSection}>
-                        <Text style={styles.filterSectionTitle}>Durum</Text>
-                        <View style={styles.statusFilters}>
-                            {STATUS_FILTERS.map((status) => (
-                                <TouchableOpacity
-                                    key={status.label}
-                                    style={[
-                                        styles.statusChip,
-                                        selectedStatus === status.value && styles.statusChipActive,
-                                    ]}
-                                    onPress={() => handleStatusChange(status.value)}
-                                    activeOpacity={0.7}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.statusChipText,
-                                            selectedStatus === status.value && styles.statusChipTextActive,
-                                        ]}
-                                    >
-                                        {status.label}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    </View>
-
-                    {/* Reset Button */}
-                    {getActiveFiltersCount() > 0 && (
-                        <TouchableOpacity
-                            style={styles.resetFiltersButton}
-                            onPress={() => {
-                                setSelectedCategory(undefined);
-                                setSelectedStatus(undefined);
-                                setFilters({ status: undefined });
-                            }}
-                            activeOpacity={0.7}
-                        >
-                            <Text style={{ fontSize: 16 }}>🔄</Text>
-                            <Text style={styles.resetFiltersText}>Filtreleri Sıfırla</Text>
-                        </TouchableOpacity>
-                    )}
+                {/* Feed Section Label */}
+                <View style={styles.feedTitleRow}>
+                    <Text style={styles.feedTitle}>
+                        {showingFavorites
+                            ? 'Favori Sorularım'
+                            : selectedCategory
+                              ? CATEGORIES.find((c) => c.value === selectedCategory)?.label ||
+                                'Sorular'
+                              : 'Tüm Paylaşımlar'}
+                    </Text>
+                    <Text style={styles.feedCount}>{questions.length} konu</Text>
                 </View>
-            )}
+            </View>
+        ),
+        [
+            styles,
+            theme.colors,
+            router,
+            handleAskQuestion,
+            activeSortTab,
+            handleSortChange,
+            showingFavorites,
+            selectedCategory,
+            handleCategoryChange,
+            shouldShowSpotlight,
+            spotlightQuestions,
+            handleQuestionPress,
+            questions.length,
+        ]
+    );
 
-            {/* Popular Questions Widget */}
-            {shouldShowWidget && popularQuestionsQuery.data?.questions.length > 0 && (
-                <View style={styles.widgetContainer}>
-                    <View style={styles.popularContainer}>
-                        <View style={styles.popularHeader}>
-                            <Text style={styles.popularTitle}>Popüler Sorular</Text>
-                            <TouchableOpacity onPress={() => router.push({
-                                pathname: '/(tabs)/community/search' as any,
-                                params: { sort: 'popular' },
-                            })}>
-                                <Text style={styles.seeAllText}>Tümünü Gör</Text>
-                            </TouchableOpacity>
-                        </View>
-                        {popularQuestionsQuery.data.questions.slice(0, 5).map((question, index) => (
-                            <TouchableOpacity
-                                key={question.id}
-                                style={[
-                                    styles.popularQuestionItem,
-                                    index !== popularQuestionsQuery.data.questions.slice(0, 5).length - 1 && styles.popularQuestionBorder,
-                                ]}
-                                onPress={() => router.push({
-                                    pathname: '/(tabs)/community/[id]' as any,
-                                    params: { id: question.id },
-                                })}
-                            >
-                                <View style={styles.popularQuestionContent}>
-                                    <Text style={styles.popularQuestionTitle} numberOfLines={2}>
-                                        {question.title}
-                                    </Text>
-                                    <View style={styles.popularQuestionMeta}>
-                                        <View style={styles.popularMetaItem}>
-                                            <Text style={{ fontSize: 14 }}>💬</Text>
-                                            <Text style={styles.popularMetaText}>{question._count?.answers || 0}</Text>
-                                        </View>
-                                        <View style={styles.popularMetaItem}>
-                                            <Text style={{ fontSize: 14 }}>👁️</Text>
-                                            <Text style={styles.popularMetaText}>{question.viewCount}</Text>
-                                        </View>
-                                    </View>
-                                </View>
-                                <Text style={{ fontSize: 20 }}>➡️</Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-                </View>
-            )}
-        </View>
-    ), [styles, questions.length, theme.colors, router, sortBy, getActiveFiltersCount, showFilters, selectedCategory, selectedStatus, searchQuery, handleNotificationSettings, handleAskQuestion, handleSortChange, handleCategoryChange, handleStatusChange, shouldShowWidget, popularQuestionsQuery.data]);
-
-    // Render empty state
     const renderEmpty = useCallback(() => {
-        if (currentIsLoading) return <QuestionListSkeleton count={5} />;
+        if (currentIsLoading) return <QuestionListSkeleton count={4} />;
 
         if (showingFavorites) {
             return (
-                <View style={styles.emptyState}>
-                    <Text style={{ fontSize: 64 }}>❤️</Text>
-                    <Text style={styles.emptyTitle}>Henüz Favori Yok</Text>
-                    <Text style={styles.emptyText}>
-                        Beğendiğiniz soruları favorileyin, buradan kolayca erişin
-                    </Text>
-                </View>
+                <EmptyState
+                    type="favorites"
+                    actionLabel="Soruları Keşfet"
+                    onAction={() => handleSortChange('recent')}
+                />
             );
         }
 
         return (
             <EmptyState
                 type="questions"
-                actionLabel="Soru Sor"
+                actionLabel="İlk Soruyu Sor"
                 onAction={handleAskQuestion}
             />
         );
-    }, [currentIsLoading, showingFavorites, handleAskQuestion, styles]);
+    }, [currentIsLoading, showingFavorites, handleSortChange, handleAskQuestion]);
 
-    // Render footer
     const renderFooter = useCallback(() => {
         if (!isFetchingNextPage) return null;
-
         return (
             <View style={styles.footer}>
                 <ActivityIndicator size="small" color={theme.colors.primary} />
@@ -441,23 +445,15 @@ export default function CommunityIndexScreen() {
         );
     }, [isFetchingNextPage, styles.footer, theme.colors.primary]);
 
-    // Memoized render item - MUST be before early return
-    const renderItem = useCallback(({ item }: { item: Question }) => (
-        <QuestionCard
-            question={item}
-            onPress={() => handleQuestionPress(item)}
-        />
-    ), [handleQuestionPress]);
+    const renderItem = useCallback(
+        ({ item }: { item: Question }) => (
+            <QuestionCard question={item} onPress={() => handleQuestionPress(item)} />
+        ),
+        [handleQuestionPress]
+    );
 
-    // Memoized key extractor - MUST be before early return
     const keyExtractor = useCallback((item: Question) => item.id, []);
 
-    // Determine loading and error states based on current view
-    const currentIsLoading = showingFavorites ? favoritesLoading : isLoading;
-    const currentIsError = showingFavorites ? favoritesError : isError;
-    const currentIsRefreshing = showingFavorites ? isRefetchingFavorites : isRefetching;
-
-    // Render error state - AFTER all hooks
     if (currentIsError) {
         const errorType = !isConnected ? 'network' : 'server';
         return (
@@ -465,8 +461,30 @@ export default function CommunityIndexScreen() {
                 <OfflineBanner />
                 <ErrorState
                     type={errorType}
-                    onRetry={() => showingFavorites ? refetchFavorites() : refetch()}
+                    onRetry={() => (showingFavorites ? refetchFavorites() : refetch())}
                 />
+            </SafeAreaView>
+        );
+    }
+
+    if (flags.community_enabled === false) {
+        return (
+            <SafeAreaView style={styles.safeArea} edges={['top']}>
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, gap: 12 }}>
+                    <Ionicons name="people-outline" size={48} color={theme.colors.primary} />
+                    <Text style={{ fontSize: 18, fontWeight: '700', color: theme.colors.text, textAlign: 'center' }}>
+                        Topluluk Geçici Olarak Kapalı
+                    </Text>
+                    <Text style={{ fontSize: 14, color: theme.colors.textSecondary, textAlign: 'center', lineHeight: 20 }}>
+                        Topluluk alanı yönetici tarafından geçici olarak devre dışı bırakıldı.
+                    </Text>
+                    <TouchableOpacity
+                        style={{ backgroundColor: theme.colors.primary, paddingHorizontal: 20, paddingVertical: 11, borderRadius: 12, marginTop: 6 }}
+                        onPress={() => router.replace('/(tabs)/home' as any)}
+                    >
+                        <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Ana Sayfaya Dön</Text>
+                    </TouchableOpacity>
+                </View>
             </SafeAreaView>
         );
     }
@@ -483,7 +501,7 @@ export default function CommunityIndexScreen() {
                 ListFooterComponent={renderFooter}
                 contentContainerStyle={styles.listContent}
                 onEndReached={handleLoadMore}
-                onEndReachedThreshold={0.5}
+                onEndReachedThreshold={0.4}
                 refreshControl={
                     <RefreshControl
                         refreshing={currentIsRefreshing}
@@ -503,101 +521,92 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
             flex: 1,
             backgroundColor: theme.colors.background,
         },
-        listContainer: {
-            flex: 1,
-        },
         listContent: {
-            paddingHorizontal: theme.spacing.lg,
-            paddingBottom: 100,
+            paddingHorizontal: 16,
+            paddingTop: 6,
+            paddingBottom: 110,
+            flexGrow: 1,
         },
         header: {
-            marginBottom: theme.spacing.lg,
+            gap: 12,
+            marginBottom: 8,
         },
         headerTop: {
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
-            marginBottom: theme.spacing.lg,
+            gap: 8,
         },
         headerTitleContainer: {
             flex: 1,
         },
         headerTitle: {
-            fontSize: 28,
+            fontSize: 27,
             fontWeight: '800',
             color: theme.colors.text,
+            letterSpacing: -0.4,
         },
         headerSubtitle: {
-            fontSize: 14,
+            fontSize: 12.5,
             color: theme.colors.textSecondary,
-            marginTop: 4,
+            marginTop: 2,
+            fontWeight: '500',
         },
         headerActions: {
             flexDirection: 'row',
             alignItems: 'center',
-            gap: theme.spacing.sm,
+            gap: 8,
         },
-        notificationButton: {
-            width: 44,
-            height: 44,
+        iconButton: {
+            width: 38,
+            height: 38,
             justifyContent: 'center',
             alignItems: 'center',
             backgroundColor: theme.colors.backgroundCard,
-            borderRadius: 12,
+            borderRadius: 19,
             borderWidth: 1,
             borderColor: theme.colors.border,
         },
         askButton: {
             flexDirection: 'row',
             alignItems: 'center',
-            gap: 6,
+            gap: 4,
             backgroundColor: theme.colors.primary,
-            paddingHorizontal: theme.spacing.md,
-            paddingVertical: theme.spacing.sm,
-            borderRadius: 12,
-            shadowColor: theme.colors.primary,
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.3,
-            shadowRadius: 8,
-            elevation: 4,
+            paddingHorizontal: 13,
+            paddingVertical: 9,
+            borderRadius: 19,
         },
         askButtonText: {
-            fontSize: 14,
+            fontSize: 13.5,
             fontWeight: '700',
             color: '#fff',
         },
-        searchContainer: {
+        searchBar: {
             flexDirection: 'row',
             alignItems: 'center',
             backgroundColor: theme.colors.backgroundCard,
-            paddingHorizontal: theme.spacing.md,
-            paddingVertical: theme.spacing.sm,
-            borderRadius: 12,
+            paddingHorizontal: 14,
+            paddingVertical: 11,
+            borderRadius: 14,
             borderWidth: 1,
             borderColor: theme.colors.border,
-            marginBottom: theme.spacing.md,
-            gap: theme.spacing.sm,
+            gap: 10,
         },
         searchPlaceholder: {
             flex: 1,
-            fontSize: 16,
-            color: theme.colors.textSecondary,
-            paddingVertical: 8,
+            fontSize: 14,
+            color: theme.colors.textLight,
         },
-        sortContainer: {
-            maxHeight: 50,
-            marginBottom: theme.spacing.md,
-        },
-        sortContent: {
-            gap: theme.spacing.sm,
+        sortScroll: {
+            gap: 8,
         },
         sortChip: {
             flexDirection: 'row',
             alignItems: 'center',
             gap: 6,
-            paddingHorizontal: theme.spacing.md,
-            paddingVertical: theme.spacing.sm,
-            borderRadius: 20,
+            paddingHorizontal: 13,
+            paddingVertical: 7,
+            borderRadius: 18,
             backgroundColor: theme.colors.backgroundCard,
             borderWidth: 1,
             borderColor: theme.colors.border,
@@ -607,251 +616,117 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
             borderColor: theme.colors.primary,
         },
         sortChipText: {
-            fontSize: 14,
+            fontSize: 13,
             fontWeight: '600',
             color: theme.colors.textSecondary,
         },
         sortChipTextActive: {
-            color: '#fff',
-        },
-        filterButton: {
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 6,
-            paddingHorizontal: theme.spacing.md,
-            paddingVertical: theme.spacing.sm,
-            borderRadius: 20,
-            backgroundColor: theme.colors.backgroundCard,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-        },
-        filterButtonActive: {
-            backgroundColor: theme.colors.primary,
-            borderColor: theme.colors.primary,
-        },
-        filterButtonText: {
-            fontSize: 14,
-            fontWeight: '600',
-            color: theme.colors.textSecondary,
-        },
-        filterButtonTextActive: {
-            color: '#fff',
-        },
-        filterBadge: {
-            backgroundColor: '#fff',
-            borderRadius: 10,
-            width: 20,
-            height: 20,
-            justifyContent: 'center',
-            alignItems: 'center',
-            marginLeft: 4,
-        },
-        filterBadgeText: {
-            fontSize: 11,
+            color: '#FFFFFF',
             fontWeight: '700',
-            color: theme.colors.primary,
         },
-        filtersPanel: {
-            backgroundColor: theme.colors.backgroundCard,
-            borderRadius: 16,
-            padding: theme.spacing.lg,
-            marginTop: theme.spacing.md,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-        },
-        filterSection: {
-            marginBottom: theme.spacing.lg,
-        },
-        filterSectionTitle: {
-            fontSize: 14,
-            fontWeight: '700',
-            color: theme.colors.text,
-            marginBottom: theme.spacing.sm,
-        },
-        filterChipsContainer: {
-            gap: theme.spacing.sm,
-        },
-        categoryFilterChip: {
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 6,
-            paddingHorizontal: theme.spacing.md,
-            paddingVertical: theme.spacing.sm,
-            borderRadius: 20,
-            backgroundColor: theme.colors.background,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-        },
-        categoryFilterChipActive: {
-            backgroundColor: theme.colors.primary,
-            borderColor: theme.colors.primary,
-        },
-        categoryIcon: {
-            fontSize: 16,
-        },
-        categoryFilterText: {
-            fontSize: 13,
-            fontWeight: '600',
-            color: theme.colors.text,
-        },
-        categoryFilterTextActive: {
-            color: '#fff',
-        },
-        statusFilters: {
-            flexDirection: 'row',
-            gap: theme.spacing.sm,
-        },
-        statusChip: {
-            flex: 1,
-            paddingVertical: theme.spacing.sm,
-            borderRadius: 12,
-            backgroundColor: theme.colors.background,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-            alignItems: 'center',
-        },
-        statusChipActive: {
-            backgroundColor: theme.colors.primary,
-            borderColor: theme.colors.primary,
-        },
-        statusChipText: {
-            fontSize: 13,
-            fontWeight: '600',
-            color: theme.colors.text,
-        },
-        statusChipTextActive: {
-            color: '#fff',
-        },
-        resetFiltersButton: {
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
+        categoriesScroll: {
             gap: 8,
-            paddingVertical: theme.spacing.md,
-            borderRadius: 12,
+        },
+        categoryChip: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 5,
+            paddingHorizontal: 11,
+            paddingVertical: 6,
+            borderRadius: 14,
             backgroundColor: theme.colors.background,
             borderWidth: 1,
             borderColor: theme.colors.border,
-            marginTop: theme.spacing.sm,
         },
-        resetFiltersText: {
-            fontSize: 14,
+        categoryChipActive: {
+            backgroundColor: theme.colors.backgroundSecondary,
+            borderColor: theme.colors.primary,
+        },
+        categoryChipText: {
+            fontSize: 12,
             fontWeight: '600',
-            color: theme.colors.text,
-        },
-        emptyState: {
-            alignItems: 'center',
-            justifyContent: 'center',
-            paddingVertical: theme.spacing.xl * 3,
-        },
-        emptyTitle: {
-            fontSize: 18,
-            fontWeight: '700',
-            color: theme.colors.text,
-            marginTop: theme.spacing.lg,
-            marginBottom: theme.spacing.sm,
-        },
-        emptyText: {
-            fontSize: 14,
             color: theme.colors.textSecondary,
-            textAlign: 'center',
-            paddingHorizontal: theme.spacing.xl,
         },
-        footer: {
-            paddingVertical: theme.spacing.lg,
-            alignItems: 'center',
-        },
-        errorContainer: {
-            flex: 1,
-            justifyContent: 'center',
-            alignItems: 'center',
-            paddingHorizontal: theme.spacing.xl,
-        },
-        errorTitle: {
-            fontSize: 20,
+        categoryChipTextActive: {
+            color: theme.colors.primary,
             fontWeight: '700',
-            color: theme.colors.text,
-            marginTop: theme.spacing.lg,
-            marginBottom: theme.spacing.sm,
         },
-        errorText: {
-            fontSize: 14,
-            color: theme.colors.textSecondary,
-            textAlign: 'center',
-            marginBottom: theme.spacing.xl,
+        spotlightSection: {
+            gap: 10,
+            marginTop: 2,
         },
-        retryButton: {
-            backgroundColor: theme.colors.primary,
-            paddingHorizontal: theme.spacing.xl,
-            paddingVertical: theme.spacing.md,
-            borderRadius: 12,
-        },
-        retryButtonText: {
-            fontSize: 16,
-            fontWeight: '700',
-            color: '#fff',
-        },
-        loadingOverlay: {
-            ...StyleSheet.absoluteFillObject,
-            backgroundColor: 'rgba(0, 0, 0, 0.3)',
-            justifyContent: 'center',
-            alignItems: 'center',
-        },
-        widgetContainer: {
-            marginTop: theme.spacing.md,
-        },
-        popularContainer: {
-            backgroundColor: theme.colors.backgroundCard,
-            borderRadius: 12,
-            padding: 16,
-        },
-        popularHeader: {
+        spotlightHeader: {
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
-            marginBottom: 16,
         },
-        popularTitle: {
-            fontSize: 18,
-            fontWeight: '600',
+        spotlightTitleRow: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+        },
+        spotlightHeading: {
+            fontSize: 15,
+            fontWeight: '700',
             color: theme.colors.text,
         },
         seeAllText: {
-            fontSize: 14,
-            color: theme.colors.primary,
+            fontSize: 13,
             fontWeight: '600',
+            color: theme.colors.primary,
         },
-        popularQuestionItem: {
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingVertical: 12,
+        spotlightScroll: {
+            gap: 10,
         },
-        popularQuestionBorder: {
-            borderBottomWidth: 1,
-            borderBottomColor: theme.colors.border,
+        spotlightCard: {
+            width: 236,
+            backgroundColor: theme.colors.backgroundCard,
+            borderRadius: 16,
+            padding: 14,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            justifyContent: 'space-between',
+            gap: 10,
         },
-        popularQuestionContent: {
-            flex: 1,
-            marginRight: 12,
-        },
-        popularQuestionTitle: {
-            fontSize: 15,
-            fontWeight: '500',
+        spotlightCardTitle: {
+            fontSize: 14,
+            fontWeight: '700',
             color: theme.colors.text,
-            marginBottom: 8,
+            lineHeight: 19,
         },
-        popularQuestionMeta: {
+        spotlightCardFooter: {
             flexDirection: 'row',
             alignItems: 'center',
             gap: 12,
         },
-        popularMetaItem: {
+        spotlightStat: {
             flexDirection: 'row',
             alignItems: 'center',
             gap: 4,
         },
-        popularMetaText: {
+        spotlightStatText: {
             fontSize: 12,
+            fontWeight: '600',
             color: theme.colors.textSecondary,
+        },
+        feedTitleRow: {
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginTop: 4,
+        },
+        feedTitle: {
+            fontSize: 16,
+            fontWeight: '700',
+            color: theme.colors.text,
+        },
+        feedCount: {
+            fontSize: 12.5,
+            color: theme.colors.textLight,
+            fontWeight: '600',
+        },
+        footer: {
+            paddingVertical: 16,
+            alignItems: 'center',
         },
     });

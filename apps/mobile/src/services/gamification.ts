@@ -4,6 +4,8 @@ import type {
     UserAchievement,
     UserInsight,
     AchievementProgress,
+    DailyTasksResponse,
+    DailyCheckinPayload,
 } from '../types/gamification';
 
 export const gamificationService = {
@@ -28,13 +30,18 @@ export const gamificationService = {
     },
 
     // Get user insights
-    async getInsights(): Promise<UserInsight[]> {
-        return api.get<UserInsight[]>('/gamification/insights');
+    async getInsights(includeRead = true): Promise<UserInsight[]> {
+        return api.get<UserInsight[]>(`/gamification/insights?includeRead=${includeRead}`);
     },
 
     // Mark insight as read
     async markInsightAsRead(insightId: string): Promise<void> {
         await api.post<void>(`/gamification/insights/${insightId}/read`);
+    },
+
+    // Mark all insights as read
+    async markAllInsightsAsRead(): Promise<void> {
+        await api.post<void>('/gamification/insights/read-all');
     },
 
     // Generate new insights
@@ -45,5 +52,15 @@ export const gamificationService = {
     // Reset gamification data
     async resetGamification(): Promise<{ message: string }> {
         return api.post<{ message: string }>('/gamification/reset');
+    },
+
+    // Get today's 3 mini tasks & check-in state
+    async getDailyTasks(): Promise<DailyTasksResponse> {
+        return api.get<DailyTasksResponse>('/gamification/daily-tasks');
+    },
+
+    // Submit 5-second daily check-in
+    async submitDailyCheckin(payload: DailyCheckinPayload): Promise<DailyTasksResponse & { streak?: number; level?: number; totalXp?: number }> {
+        return api.post<DailyTasksResponse & { streak?: number; level?: number; totalXp?: number }>('/gamification/daily-checkin', payload);
     },
 };

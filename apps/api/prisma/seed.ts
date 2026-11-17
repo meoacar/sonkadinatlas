@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { hash } from 'bcrypt';
+import { seedCommunity } from './seed-community';
+import { seedAstrology } from './seed-astrology';
 
 const prisma = new PrismaClient();
 
@@ -148,32 +150,20 @@ async function main() {
   console.log('✅ Created premium model policy:', premiumPolicy.id);
 
   // Create feature flags
-  await prisma.featureFlag.upsert({
-    where: { key: 'ai.google.enabled' },
-    update: {},
-    create: {
-      key: 'ai.google.enabled',
-      valueJson: false,
-    },
-  });
+  const coreFlags = [
+    { key: 'maintenance_mode', valueJson: false },
+    { key: 'partner_mode_enabled', valueJson: true },
+    { key: 'community_enabled', valueJson: true },
+    { key: 'astrology_enabled', valueJson: true },
+  ];
 
-  await prisma.featureFlag.upsert({
-    where: { key: 'reminders.server_push' },
-    update: {},
-    create: {
-      key: 'reminders.server_push',
-      valueJson: true,
-    },
-  });
-
-  await prisma.featureFlag.upsert({
-    where: { key: 'admin.impersonation' },
-    update: {},
-    create: {
-      key: 'admin.impersonation',
-      valueJson: false,
-    },
-  });
+  for (const flag of coreFlags) {
+    await prisma.featureFlag.upsert({
+      where: { key: flag.key },
+      update: {},
+      create: flag,
+    });
+  }
 
   console.log('✅ Created feature flags');
 
@@ -1274,6 +1264,8 @@ Sexual health is an important part of your overall health and requires open comm
   }
 
   console.log('✅ Q&A badges seeded successfully!');
+  await seedCommunity();
+  await seedAstrology();
   console.log('🎉 Seeding completed successfully!');
 }
 

@@ -15,93 +15,46 @@ interface DayMarkersProps {
   markers: MarkerType[];
   isPredicted?: boolean;
   maxVisible?: number;
-  mood?: string[]; // Array of moods for the day
+  mood?: string[];
 }
 
-export function DayMarkers({ markers, isPredicted, maxVisible = 4, mood }: DayMarkersProps) {
+// Phase indicators (period, fertile, ovulation) are shown on the day cell itself.
+// DayMarkers focuses on compact dots for user-logged entries so day numbers stay readable.
+export function DayMarkers({ markers, maxVisible = 3, mood }: DayMarkersProps) {
   const theme = useTheme();
 
-  // Calculate mood emoji based on selections
-  const getMoodEmoji = (moods: string[]): string | null => {
-    if (!moods || moods.length === 0) return null;
+  const logMarkers = markers.filter(
+    (m) => m !== 'period' && m !== 'fertile' && m !== 'ovulation'
+  );
 
-    console.log('DayMarkers - Processing moods:', moods);
+  const hasMood = (mood && mood.length > 0) || logMarkers.includes('mood');
+  const combined: MarkerType[] = [];
 
-    const positiveMoods = ['Mutlu', 'Enerjik', 'Sakin'];
-    const negativeMoods = ['Üzgün', 'Sinirli', 'Anksiyetli', 'Huzursuz'];
+  if (logMarkers.includes('sex')) combined.push('sex');
+  if (logMarkers.includes('symptom')) combined.push('symptom');
+  if (hasMood) combined.push('mood');
+  if (logMarkers.includes('medication')) combined.push('medication');
+  if (logMarkers.includes('appointment')) combined.push('appointment');
 
-    const positiveCount = moods.filter(m => positiveMoods.includes(m)).length;
-    const negativeCount = moods.filter(m => negativeMoods.includes(m)).length;
+  if (combined.length === 0) {
+    return <View style={styles.emptySpacer} />;
+  }
 
-    console.log('DayMarkers - Positive count:', positiveCount, 'Negative count:', negativeCount);
+  const visible = combined.slice(0, maxVisible);
+  const overflowCount = combined.length - maxVisible;
 
-    // If only positive moods selected
-    if (positiveCount > 0 && negativeCount === 0) {
-      console.log('DayMarkers - Returning positive emoji');
-      return '😊';
-    }
-
-    // If only negative moods selected
-    if (negativeCount > 0 && positiveCount === 0) {
-      console.log('DayMarkers - Returning negative emoji');
-      return '😔';
-    }
-
-    // If mixed selection
-    if (positiveCount > 0 && negativeCount > 0) {
-      console.log('DayMarkers - Returning neutral emoji');
-      return '😐';
-    }
-
-    console.log('DayMarkers - No mood emoji returned');
-    return null;
-  };
-
-  const moodEmoji = getMoodEmoji(mood || []);
-  console.log('DayMarkers - Final mood emoji:', moodEmoji, 'for moods:', mood);
-
-  const visibleMarkers = markers.slice(0, maxVisible);
-  const overflowCount = markers.length - maxVisible;
-
-  const getMarkerIcon = (type: MarkerType): string => {
+  const getDotColor = (type: MarkerType): string => {
     switch (type) {
-      case 'period':
-        return '●';
-      case 'fertile':
-        return '○';
-      case 'ovulation':
-        return '⭐';
       case 'sex':
-        return '♥';
+        return '#F43F5E';
       case 'symptom':
-        return '😐';
-      case 'medication':
-        return '💊';
-      case 'appointment':
-        return '📅';
+        return '#F59E0B';
       case 'mood':
-        return moodEmoji || '😐';
-      default:
-        return '•';
-    }
-  };
-
-  const getMarkerColor = (type: MarkerType): string => {
-    switch (type) {
-      case 'period':
-        return '#FF1493';
-      case 'fertile':
-        return '#9C27B0';
-      case 'ovulation':
-        return '#FFD700';
-      case 'sex':
-        return '#FF69B4';
-      case 'symptom':
-        return '#FFA500';
+        return '#8B5CF6';
       case 'medication':
-        return '#00CED1';
+        return '#06B6D4';
       case 'appointment':
-        return '#4CAF50';
+        return '#10B981';
       default:
         return theme.colors.textSecondary;
     }
@@ -109,64 +62,42 @@ export function DayMarkers({ markers, isPredicted, maxVisible = 4, mood }: DayMa
 
   return (
     <View style={styles.markersContainer}>
-      {/* Show mood emoji first if available */}
-      {moodEmoji && (
-        <Text style={styles.moodMarker}>
-          {moodEmoji}
-        </Text>
-      )}
-      {visibleMarkers.filter(m => m !== 'mood').map((marker, index) => (
-        <Text
-          key={`${marker}-${index}`}
-          style={[
-            styles.marker,
-            { color: getMarkerColor(marker) },
-          ]}
-        >
-          {getMarkerIcon(marker)}
-        </Text>
+      {visible.map((marker) => (
+        <View
+          key={marker}
+          style={[styles.dot, { backgroundColor: getDotColor(marker) }]}
+        />
       ))}
       {overflowCount > 0 && (
-        <Text style={[styles.overflow, { color: theme.colors.textSecondary }]}>
+        <Text style={[styles.overflow, { color: theme.colors.textLight }]}>
           +{overflowCount}
         </Text>
-      )}
-      {isPredicted && (
-        <View style={[styles.predictedBadge, { borderColor: '#FF69B4' }]} />
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  emptySpacer: {
+    height: 6,
+    marginTop: 2,
+  },
   markersContainer: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 2.5,
     marginTop: 2,
-    minHeight: 14,
+    height: 6,
   },
-  moodMarker: {
-    fontSize: 12,
-    marginHorizontal: 1,
-  },
-  marker: {
-    fontSize: 8,
-    marginHorizontal: 1,
+  dot: {
+    width: 4.5,
+    height: 4.5,
+    borderRadius: 2.25,
   },
   overflow: {
     fontSize: 7,
-    fontWeight: '600',
-    marginLeft: 1,
-  },
-  predictedBadge: {
-    position: 'absolute',
-    top: -2,
-    right: -2,
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    borderWidth: 1,
+    fontWeight: '700',
+    lineHeight: 8,
   },
 });

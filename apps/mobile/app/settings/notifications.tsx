@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@/hooks/useTheme';
 
 export default function NotificationSettingsScreen() {
@@ -19,6 +20,7 @@ export default function NotificationSettingsScreen() {
     const theme = useTheme();
     const [notificationsEnabled, setNotificationsEnabled] = useState(false);
     const [periodReminders, setPeriodReminders] = useState(true);
+    const [discreetMode, setDiscreetMode] = useState(false);
     const [pregnancyUpdates, setPregnancyUpdates] = useState(true);
     const [appointmentReminders, setAppointmentReminders] = useState(true);
     const [dailyTips, setDailyTips] = useState(true);
@@ -28,7 +30,15 @@ export default function NotificationSettingsScreen() {
 
     useEffect(() => {
         checkNotificationPermissions();
+        AsyncStorage.getItem('@discreet_period_notifications')
+            .then((v) => setDiscreetMode(v === 'true'))
+            .catch(() => {});
     }, []);
+
+    const handleToggleDiscreetMode = async (value: boolean) => {
+        setDiscreetMode(value);
+        await AsyncStorage.setItem('@discreet_period_notifications', value ? 'true' : 'false');
+    };
 
     const checkNotificationPermissions = async () => {
         const { status } = await Notifications.getPermissionsAsync();
@@ -115,6 +125,21 @@ export default function NotificationSettingsScreen() {
                                 <Switch
                                     value={periodReminders}
                                     onValueChange={setPeriodReminders}
+                                    trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
+                                    thumbColor={Platform.OS === 'ios' ? undefined : '#fff'}
+                                />
+                            </View>
+
+                            <View style={styles.settingItem}>
+                                <View style={styles.settingInfo}>
+                                    <Text style={styles.settingTitle}>Kilit Ekranı Gizli Modu 🔒</Text>
+                                    <Text style={styles.settingDescription}>
+                                        Kilit ekranında &quot;regl&quot; ifadesi yerine nötr bakım hatırlatması göster
+                                    </Text>
+                                </View>
+                                <Switch
+                                    value={discreetMode}
+                                    onValueChange={handleToggleDiscreetMode}
                                     trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
                                     thumbColor={Platform.OS === 'ios' ? undefined : '#fff'}
                                 />

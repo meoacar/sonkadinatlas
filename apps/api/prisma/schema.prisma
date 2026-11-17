@@ -194,6 +194,9 @@ model User {
   gamification         UserGamification?
   insights             UserInsight[]
 
+  // Astrology Relations
+  birthChartProfile    BirthChartProfile?
+
   @@index([email])
   @@index([username])
 }
@@ -1288,4 +1291,70 @@ model UserInsight {
   
   @@index([userId, isRead, createdAt])
   @@index([userId, expiresAt])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Astrology & Horoscope Management
+// ────────────────────────────────────────────────────────────────────────────
+
+model HoroscopeEntry {
+  id          String   @id @default(cuid())
+  sign        String   // aries..pisces
+  period      String   // daily | weekly | monthly
+  title       String?
+  summary     String   @db.Text
+  loveText    String?  @db.Text
+  careerText  String?  @db.Text
+  healthText  String?  @db.Text
+  loveScore   Int      @default(4)
+  careerScore Int      @default(4)
+  healthScore Int      @default(4)
+  energyScore Int      @default(82)
+  luckyNumber Int      @default(7)
+  luckyColor  String   @default("Gül Kurusu")
+  luckyStone  String?
+  affirmation String?  @db.Text
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([sign, period])
+  @@index([period, isActive])
+  @@map("horoscope_entries")
+}
+
+model CosmicOverview {
+  id               String   @id @default(cuid())
+  key              String   @unique @default("current")
+  moonPhase        String   // Örn: Dolunay, Hilal, İlk Dördün
+  moonSign         String   // Örn: Yengeç, Terazi
+  cosmicTheme      String
+  retrogradeNote   String?  @db.Text
+  dailyAffirmation String   @db.Text
+  energyIndex      Int      @default(84)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("cosmic_overviews")
+}
+
+model BirthChartProfile {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  birthDate     DateTime
+  birthTime     String
+  city          String
+  sunSign       String
+  moonSign      String
+  risingSign    String
+  sunDegree     Float    @default(0)
+  moonDegree    Float    @default(0)
+  risingDegree  Float    @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("birth_chart_profiles")
 }

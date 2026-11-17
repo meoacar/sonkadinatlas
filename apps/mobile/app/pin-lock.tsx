@@ -1,9 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   Alert,
   ActivityIndicator,
@@ -11,128 +10,111 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { userService } from '@/services/api';
+import { useAuthStore } from '@/store/authStore';
+
+const KEYPAD_ROWS = [
+  ['1', '2', '3'],
+  ['4', '5', '6'],
+  ['7', '8', '9'],
+  ['clear', '0', 'back'],
+] as const;
 
 export default function PinLockScreen() {
   const router = useRouter();
   const theme = useTheme();
   const styles = createStyles(theme);
+  const logout = useAuthStore((state) => state.logout);
 
   const [pin, setPin] = useState('');
   const [attempts, setAttempts] = useState(0);
   const [isVerifying, setIsVerifying] = useState(false);
-  const pinInputRef = useRef<TextInput>(null);
+  const [errorText, setErrorText] = useState<string | null>(null);
 
-  useEffect(() => {
-    // Auto-focus input
-    setTimeout(() => pinInputRef.current?.focus(), 100);
-  }, []);
+  const verifyPin = useCallback(
+    async (pinCode: string) => {
+      if (isVerifying || pinCode.length < 4) return;
 
-  const handlePinChange = (text: string) => {
-    if (isVerifying) return; // Prevent input during verification
+      try {
+        setIsVerifying(true);
+        setErrorText(null);
+        await userService.verifyPin(pinCode);
+        await SecureStore.setItemAsync('pinVerified', 'true');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        router.replace('/(tabs)/home');
+      } catch {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+        const newAttempts = attempts + 1;
+        setAttempts(newAttempts);
+        setPin('');
 
-    const numericText = text.replace(/[^0-9]/g, '');
-    if (numericText.length <= 6) {
-      setPin(numericText);
-
-      // Don't auto-verify - wait for user to finish
-      // User can press a button or we can add a small delay
-    }
-  };
-
-  const verifyPin = async (pinCode: string) => {
-    if (isVerifying) return;
-    if (pinCode.length < 4) return;
-
-    try {
-      setIsVerifying(true);
-      await userService.verifyPin(pinCode);
-
-      // Success! Navigate to the app
-      await SecureStore.setItemAsync('pinVerified', 'true');
-      router.replace('/(tabs)/home');
-    } catch (error: any) {
-      const newAttempts = attempts + 1;
-      setAttempts(newAttempts);
-
-      if (newAttempts >= 5) {
-        // Too many attempts - logout
-        Alert.alert(
-          'Çok Fazla Hatalı Deneme',
-          'Güvenlik nedeniyle oturumunuz kapatılacak.',
-          [
-            {
-              text: 'Tamam',
-              onPress: async () => {
-                await SecureStore.deleteItemAsync('accessToken');
-                await SecureStore.deleteItemAsync('refreshToken');
-                await SecureStore.deleteItemAsync('user');
-                await SecureStore.deleteItemAsync('pinEnabled');
-                await SecureStore.deleteItemAsync('pinVerified');
-                router.replace('/(auth)/signin');
+        if (newAttempts >= 5) {
+          Alert.alert(
+            'Çok Fazla Hatalı Deneme',
+            'Güvenlik nedeniyle oturumunuz kapatılacak.',
+            [
+              {
+                text: 'Tamam',
+                onPress: async () => {
+                  await logout();
+                  router.replace('/(auth)/signin');
+                },
               },
-            },
-          ]
-        );
-      } else {
-        Alert.alert('Hata', `Yanlış PIN. ${5 - newAttempts} deneme hakkınız kaldı.`, [
-          {
-            text: 'Tamam',
-            onPress: () => {
-              setPin('');
-              setTimeout(() => pinInputRef.current?.focus(), 100);
-            },
-          },
-        ]);
+            ],
+          );
+        } else {
+          setErrorText(`Yanlış PIN. ${5 - newAttempts} deneme hakkınız kaldı.`);
+        }
+      } finally {
+        setIsVerifying(false);
       }
-    } finally {
-      setIsVerifying(false);
-    }
-  };
+    },
+    [attempts, isVerifying, logout, router],
+  );
 
-  // Add useEffect to auto-verify when PIN reaches expected length
+  // Auto-verify if user enters full 6 digits
   useEffect(() => {
     if (pin.length === 6 && !isVerifying) {
       verifyPin(pin);
     }
-  }, [pin]);
+  }, [pin, isVerifying, verifyPin]);
+
+  const handleDigitPress = (key: string) => {
+    if (isVerifying) return;
+    setErrorText(null);
+    Haptics.selectionAsync().catch(() => {});
+
+    if (key === 'clear') {
+      setPin('');
+      return;
+    }
+    if (key === 'back') {
+      setPin((prev) => prev.slice(0, -1));
+      return;
+    }
+    if (pin.length < 6) {
+      setPin((prev) => prev + key);
+    }
+  };
 
   const handleForgotPin = () => {
     Alert.alert(
-      'PIN Unuttum',
-      'PIN kodunuzu unuttuysanız, yeniden giriş yapmanız gerekmektedir.',
+      'PIN Kodunu Sıfırla',
+      'PIN kodunuzu unuttuysanız güvenlik amacıyla oturumdan çıkış yapıp şifrenizle tekrar giriş yapmalısınız.',
       [
         { text: 'İptal', style: 'cancel' },
         {
           text: 'Çıkış Yap',
           style: 'destructive',
           onPress: async () => {
-            await SecureStore.deleteItemAsync('accessToken');
-            await SecureStore.deleteItemAsync('refreshToken');
-            await SecureStore.deleteItemAsync('user');
-            await SecureStore.deleteItemAsync('pinEnabled');
-            await SecureStore.deleteItemAsync('pinVerified');
+            await logout();
             router.replace('/(auth)/signin');
           },
         },
-      ]
-    );
-  };
-
-  const renderPinDots = () => {
-    return (
-      <View style={styles.pinDotsContainer}>
-        {[0, 1, 2, 3, 4, 5].map((index) => (
-          <View
-            key={index}
-            style={[
-              styles.pinDot,
-              index < pin.length && styles.pinDotFilled,
-            ]}
-          />
-        ))}
-      </View>
+      ],
     );
   };
 
@@ -140,29 +122,86 @@ export default function PinLockScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.logo}>🔒</Text>
-          <Text style={styles.title}>Wellness Companion</Text>
-          <Text style={styles.subtitle}>PIN kodunuzu girin</Text>
+          <View style={styles.lockHalo}>
+            <Ionicons name="lock-closed" size={32} color={theme.colors.primary} />
+          </View>
+          <Text style={styles.title}>Kadın Atlası</Text>
+          <Text style={styles.subtitle}>Devam etmek için PIN kodunuzu girin</Text>
         </View>
 
-        <View style={styles.pinContainer}>
-          <TextInput
-            ref={pinInputRef}
-            style={styles.hiddenInput}
-            value={pin}
-            onChangeText={handlePinChange}
-            keyboardType="number-pad"
-            maxLength={6}
-            secureTextEntry
-            autoFocus
-            editable={!isVerifying}
-          />
-          {renderPinDots()}
+        <View style={styles.pinDotsContainer}>
+          {[0, 1, 2, 3, 4, 5].map((index) => {
+            const filled = index < pin.length;
+            return (
+              <View
+                key={index}
+                style={[
+                  styles.pinBox,
+                  filled && styles.pinBoxFilled,
+                  index >= 4 && !filled && styles.pinBoxOptional,
+                ]}
+              >
+                {filled && <View style={styles.pinInnerDot} />}
+              </View>
+            );
+          })}
+        </View>
 
-          {isVerifying && (
-            <ActivityIndicator size="small" color={theme.colors.primary} style={styles.loader} />
+        {errorText ? (
+          <Text style={styles.errorText}>{errorText}</Text>
+        ) : (
+          <Text style={styles.helperText}>4–6 haneli PIN kodunuz ({pin.length}/6)</Text>
+        )}
+
+        <View style={styles.keypad}>
+          {KEYPAD_ROWS.map((row, rIdx) => (
+            <View key={rIdx} style={styles.keypadRow}>
+              {row.map((key) => {
+                const isSpecial = key === 'clear' || key === 'back';
+                return (
+                  <TouchableOpacity
+                    key={key}
+                    activeOpacity={0.65}
+                    disabled={isVerifying}
+                    onPress={() => handleDigitPress(key)}
+                    style={[
+                      styles.keypadKey,
+                      isSpecial && styles.keypadKeySpecial,
+                    ]}
+                  >
+                    {key === 'back' ? (
+                      <Ionicons
+                        name="backspace-outline"
+                        size={24}
+                        color={theme.colors.text}
+                      />
+                    ) : key === 'clear' ? (
+                      <Text style={styles.keypadClearText}>Temizle</Text>
+                    ) : (
+                      <Text style={styles.keypadDigitText}>{key}</Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ))}
+        </View>
+
+        <TouchableOpacity
+          activeOpacity={0.85}
+          disabled={pin.length < 4 || isVerifying}
+          onPress={() => verifyPin(pin)}
+          style={[
+            styles.unlockButton,
+            (pin.length < 4 || isVerifying) && styles.unlockButtonDisabled,
+          ]}
+        >
+          {isVerifying ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.unlockButtonText}>Kilidi Aç</Text>
           )}
-        </View>
+        </TouchableOpacity>
 
         <TouchableOpacity
           onPress={handleForgotPin}
@@ -186,57 +225,128 @@ const createStyles = (theme: any) =>
       flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
-      padding: 24,
+      paddingHorizontal: 24,
+      paddingVertical: 16,
     },
     header: {
       alignItems: 'center',
-      marginBottom: 60,
+      marginBottom: 24,
     },
-    logo: {
-      fontSize: 64,
-      marginBottom: 16,
+    lockHalo: {
+      width: 68,
+      height: 68,
+      borderRadius: 34,
+      backgroundColor: theme.isDark
+        ? 'rgba(236,72,153,0.18)'
+        : 'rgba(236,72,153,0.12)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 14,
     },
     title: {
       fontSize: 24,
-      fontWeight: '700',
+      fontWeight: '800',
       color: theme.colors.text,
-      marginBottom: 8,
+      marginBottom: 6,
     },
     subtitle: {
-      fontSize: 16,
+      fontSize: 14.5,
       color: theme.colors.textSecondary,
-    },
-    pinContainer: {
-      alignItems: 'center',
-      marginBottom: 40,
-    },
-    hiddenInput: {
-      position: 'absolute',
-      opacity: 0,
-      height: 0,
-      width: 0,
     },
     pinDotsContainer: {
       flexDirection: 'row',
-      gap: 16,
+      gap: 10,
+      marginBottom: 10,
     },
-    pinDot: {
-      width: 20,
-      height: 20,
-      borderRadius: 10,
-      borderWidth: 2,
+    pinBox: {
+      width: 42,
+      height: 48,
+      borderRadius: 13,
+      borderWidth: 1.5,
       borderColor: theme.colors.border,
-      backgroundColor: 'transparent',
+      backgroundColor: theme.colors.backgroundCard,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
-    pinDotFilled: {
-      backgroundColor: theme.colors.primary,
+    pinBoxOptional: {
+      borderStyle: 'dashed',
+    },
+    pinBoxFilled: {
       borderColor: theme.colors.primary,
+      backgroundColor: theme.isDark
+        ? 'rgba(236,72,153,0.16)'
+        : '#FDF2F8',
     },
-    loader: {
-      marginTop: 20,
+    pinInnerDot: {
+      width: 13,
+      height: 13,
+      borderRadius: 6.5,
+      backgroundColor: theme.colors.primary,
+    },
+    helperText: {
+      fontSize: 12.5,
+      color: theme.colors.textSecondary,
+      marginBottom: 22,
+    },
+    errorText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: '#DC2626',
+      marginBottom: 22,
+    },
+    keypad: {
+      width: '100%',
+      maxWidth: 320,
+      gap: 10,
+      marginBottom: 18,
+    },
+    keypadRow: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    keypadKey: {
+      flex: 1,
+      height: 54,
+      borderRadius: 16,
+      backgroundColor: theme.colors.backgroundCard,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    keypadKeySpecial: {
+      backgroundColor: theme.isDark ? 'rgba(255,255,255,0.03)' : '#F9FAFB',
+    },
+    keypadDigitText: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    keypadClearText: {
+      fontSize: 12.5,
+      fontWeight: '700',
+      color: theme.colors.textSecondary,
+    },
+    unlockButton: {
+      width: '100%',
+      maxWidth: 320,
+      height: 50,
+      borderRadius: 16,
+      backgroundColor: theme.colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 12,
+    },
+    unlockButtonDisabled: {
+      opacity: 0.45,
+    },
+    unlockButtonText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '800',
     },
     forgotButton: {
-      padding: 12,
+      padding: 10,
     },
     forgotText: {
       fontSize: 14,

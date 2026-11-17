@@ -1,9 +1,11 @@
 import { Tabs } from 'expo-router';
 import { Platform, Text, View } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
+import { useFeatureFlags } from '@/hooks/useFeatureFlags';
 
 export default function TabLayout() {
   const theme = useTheme();
+  const { flags } = useFeatureFlags();
 
   return (
     <Tabs
@@ -77,6 +79,7 @@ export default function TabLayout() {
         name="community"
         options={{
           title: 'Topluluk',
+          href: flags.community_enabled === false ? null : undefined,
           tabBarIcon: ({ focused }) => (
             <View style={{
               width: 32,

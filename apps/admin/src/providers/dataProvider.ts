@@ -1,5 +1,6 @@
 import { DataProvider } from '@refinedev/core';
 import axios, { AxiosInstance } from 'axios';
+import { tryRefreshAccessToken } from './authProvider';
 
 const API_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
@@ -10,22 +11,47 @@ const axiosInstance: AxiosInstance = axios.create({
   },
 });
 
+export const apiClient = axiosInstance;
+
 // Add auth token to requests
 axiosInstance.interceptors.request.use((config) => {
-  const token = localStorage.getItem('accessToken');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('accessToken');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
   }
   return config;
 });
+
+let refreshPromise: Promise<string | null> | null = null;
 
 // Handle token refresh on 401
 axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('accessToken');
-      window.location.href = '/login';
+    const originalRequest = error.config;
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+      originalRequest._retry = true;
+      if (!refreshPromise) {
+        refreshPromise = tryRefreshAccessToken().finally(() => {
+          refreshPromise = null;
+        });
+      }
+      const newToken = await refreshPromise;
+      if (newToken) {
+        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        return axiosInstance(originalRequest);
+      }
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        localStorage.removeItem('user');
+        sessionStorage.removeItem('adminVerifiedAt');
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+      }
     }
     return Promise.reject(error);
   }
@@ -71,12 +97,14 @@ export const dataProvider: DataProvider = {
       endpoint = 'qna/moderation/reports';
     } else if (resource === 'content/articles') {
       endpoint = 'discover/articles';
+    } else if (resource === 'astrology/horoscopes') {
+      endpoint = 'astrology/admin/horoscopes';
     } else if (resource === 'health/cycles') {
-      endpoint = 'cycles';
+      endpoint = 'cycles/admin/all';
     } else if (resource === 'health/pregnancy') {
       endpoint = 'pregnancy/admin/all';
     } else if (resource === 'health/wellness') {
-      endpoint = 'wellness/v1/admin/stats';
+      endpoint = 'wellness/v1/admin/overview';
     } else if (resource === 'reminders') {
       endpoint = 'reminders/admin/all';
     } else if (resource === 'ai-providers') {
@@ -163,8 +191,10 @@ export const dataProvider: DataProvider = {
       endpoint = 'qna/moderation/reports';
     } else if (resource === 'content/articles') {
       endpoint = 'discover/articles';
+    } else if (resource === 'astrology/horoscopes') {
+      endpoint = 'astrology/admin/horoscopes';
     } else if (resource === 'health/cycles') {
-      endpoint = 'cycles';
+      endpoint = 'cycles/admin';
     } else if (resource === 'health/pregnancy') {
       endpoint = 'pregnancy/admin';
     } else if (resource === 'ai/model-policies') {
@@ -182,6 +212,10 @@ export const dataProvider: DataProvider = {
     let endpoint = resource;
     if (resource === 'content/articles') {
       endpoint = 'discover/articles';
+    } else if (resource === 'astrology/horoscopes') {
+      endpoint = 'astrology/admin/horoscopes';
+    } else if (resource === 'qna/questions') {
+      endpoint = 'qna/questions/admin';
     } else if (resource === 'ai-providers') {
       endpoint = 'ai-providers';
     } else if (resource === 'ai/model-policies') {
@@ -198,7 +232,8 @@ export const dataProvider: DataProvider = {
     if (resource === 'subscriptions') {
       endpoint = 'subscription';
     } else if (resource === 'qna/questions') {
-      endpoint = 'qna/questions';
+      const { data } = await axiosInstance.patch(`/qna/questions/${id}/admin`, variables);
+      return { data };
     } else if (resource === 'qna/answers') {
       // Use admin update endpoint for answers
       const { data } = await axiosInstance.patch(`/qna/answers/${id}/admin`, variables);
@@ -213,6 +248,8 @@ export const dataProvider: DataProvider = {
       endpoint = 'qna/moderation/reports';
     } else if (resource === 'content/articles') {
       endpoint = 'discover/articles';
+    } else if (resource === 'astrology/horoscopes') {
+      endpoint = 'astrology/admin/horoscopes';
     } else if (resource === 'ai-providers') {
       // AI providers use provider name as ID, use PUT method
       const { data } = await axiosInstance.put(`/ai-providers/${id}`, variables);
@@ -236,10 +273,15 @@ export const dataProvider: DataProvider = {
       // Use POST for delete to match API
       const { data } = await axiosInstance.post(`/discover/articles/${id}/delete`);
       return { data };
+    } else if (resource === 'qna/questions') {
+      const { data } = await axiosInstance.delete(`/qna/questions/${id}/admin`);
+      return { data };
     } else if (resource === 'qna/answers') {
       // Use admin delete endpoint for answers
       const { data } = await axiosInstance.delete(`/qna/answers/${id}/admin`);
       return { data };
+    } else if (resource === 'astrology/horoscopes') {
+      endpoint = 'astrology/admin/horoscopes';
     } else if (resource === 'ai-providers') {
       // AI providers use provider name as ID
       const { data } = await axiosInstance.delete(`/ai-providers/${id}`);

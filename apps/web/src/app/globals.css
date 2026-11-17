@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-page: #fffafc;
+  --bg-card: #ffffff;
+  --text-main: #1a1523;
+  --text-muted: #5b536b;
+  --border-soft: #ffd4e7;
+}
+
+html.dark {
+  --bg-page: #0d0b12;
+  --bg-card: #171320;
+  --text-main: #faf7fc;
+  --text-muted: #a69bb8;
+  --border-soft: #2e243d;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-main);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.gradient-hero {
+  background: radial-gradient(circle at top right, rgba(255, 105, 180, 0.18), transparent 45%),
+    radial-gradient(circle at bottom left, rgba(217, 70, 239, 0.14), transparent 50%);
+}
+
+html.dark .gradient-hero {
+  background: radial-gradient(circle at top right, rgba(255, 105, 180, 0.22), transparent 45%),
+    radial-gradient(circle at bottom left, rgba(124, 58, 237, 0.2), transparent 50%);
+}

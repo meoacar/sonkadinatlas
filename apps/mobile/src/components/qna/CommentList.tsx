@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
 import { Comment } from '@/types/qna';
 import { OptimizedAvatar } from './OptimizedAvatar';
@@ -38,13 +38,14 @@ export const CommentList = memo(function CommentList({
     }
 
     return (
-        <FlatList
-            data={comments}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => <CommentItem comment={item} onReport={onReportComment} />}
-            scrollEnabled={false}
-            ItemSeparatorComponent={() => <View style={styles.separator} />}
-        />
+        <View>
+            {comments.map((item, idx) => (
+                <View key={item.id}>
+                    {idx > 0 && <View style={styles.separator} />}
+                    <CommentItem comment={item} onReport={onReportComment} />
+                </View>
+            ))}
+        </View>
     );
 });
 

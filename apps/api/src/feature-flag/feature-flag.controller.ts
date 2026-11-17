@@ -14,12 +14,18 @@ import { AdminGuard } from '../common/guards/admin.guard';
 import { FeatureFlagService } from './feature-flag.service';
 
 @Controller('feature-flags')
-@UseGuards(AuthGuard('jwt'))
 export class FeatureFlagController {
   constructor(private readonly featureFlagService: FeatureFlagService) { }
 
-  // Public read endpoints (authenticated users only)
+  // Public runtime flags for Mobile / Web apps (safe boolean/UI flags only)
+  @Get('public')
+  async findPublicFlags() {
+    return this.featureFlagService.findPublicFlags();
+  }
+
+  // Authenticated read endpoints
   @Get()
+  @UseGuards(AuthGuard('jwt'))
   async findAll(@Query('page') page?: string, @Query('limit') limit?: string) {
     return this.featureFlagService.findAll({
       page: page ? parseInt(page, 10) : undefined,
@@ -28,25 +34,26 @@ export class FeatureFlagController {
   }
 
   @Get(':key')
+  @UseGuards(AuthGuard('jwt'))
   async findOne(@Param('key') key: string) {
     return this.featureFlagService.findOne(key);
   }
 
   // Admin-only write endpoints
   @Post()
-  @UseGuards(AdminGuard)
+  @UseGuards(AuthGuard('jwt'), AdminGuard)
   async create(@Body() data: { key: string; valueJson: any }) {
     return this.featureFlagService.create(data);
   }
 
   @Patch(':key')
-  @UseGuards(AdminGuard)
+  @UseGuards(AuthGuard('jwt'), AdminGuard)
   async update(@Param('key') key: string, @Body() data: { valueJson: any }) {
     return this.featureFlagService.update(key, data);
   }
 
   @Delete(':key')
-  @UseGuards(AdminGuard)
+  @UseGuards(AuthGuard('jwt'), AdminGuard)
   async delete(@Param('key') key: string) {
     return this.featureFlagService.delete(key);
   }

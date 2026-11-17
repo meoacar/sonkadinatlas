@@ -13,6 +13,10 @@ export interface ZodiacInfo {
     element: 'fire' | 'earth' | 'air' | 'water';
     dates: string;
     color: string;
+    rulingPlanet: string;
+    strengths: string;
+    growthAreas: string;
+    compatibleSigns: ZodiacSign[];
 }
 
 export const ZODIAC_SIGNS: Record<ZodiacSign, ZodiacInfo> = {
@@ -24,6 +28,10 @@ export const ZODIAC_SIGNS: Record<ZodiacSign, ZodiacInfo> = {
         element: 'fire',
         dates: '21 Mart - 19 Nisan',
         color: '#FF6B6B',
+        rulingPlanet: 'Mars',
+        strengths: 'Cesur, enerjik, öncü ve samimi',
+        growthAreas: 'Sabır ve dürtüleri dengeleme',
+        compatibleSigns: ['leo', 'sagittarius', 'gemini', 'aquarius'],
     },
     taurus: {
         sign: 'taurus',
@@ -32,7 +40,11 @@ export const ZODIAC_SIGNS: Record<ZodiacSign, ZodiacInfo> = {
         emoji: '♉',
         element: 'earth',
         dates: '20 Nisan - 20 Mayıs',
-        color: '#4ECDC4',
+        color: '#10B981',
+        rulingPlanet: 'Venüs',
+        strengths: 'Güvenilir, sabırlı, zevk sahibi',
+        growthAreas: 'Değişime esneklik göstermek',
+        compatibleSigns: ['virgo', 'capricorn', 'cancer', 'pisces'],
     },
     gemini: {
         sign: 'gemini',
@@ -41,7 +53,11 @@ export const ZODIAC_SIGNS: Record<ZodiacSign, ZodiacInfo> = {
         emoji: '♊',
         element: 'air',
         dates: '21 Mayıs - 20 Haziran',
-        color: '#FFE66D',
+        color: '#F59E0B',
+        rulingPlanet: 'Merkür',
+        strengths: 'Zeki, konuşkan, uyumlu ve meraklı',
+        growthAreas: 'Odaklanma ve duygusal derinlik',
+        compatibleSigns: ['libra', 'aquarius', 'aries', 'leo'],
     },
     cancer: {
         sign: 'cancer',
@@ -50,7 +66,11 @@ export const ZODIAC_SIGNS: Record<ZodiacSign, ZodiacInfo> = {
         emoji: '♋',
         element: 'water',
         dates: '21 Haziran - 22 Temmuz',
-        color: '#A8DADC',
+        color: '#06B6D4',
+        rulingPlanet: 'Ay',
+        strengths: 'Şefkatli, sezgisel, koruyucu ve sadık',
+        growthAreas: 'Duygusal sınırları koruma',
+        compatibleSigns: ['scorpio', 'pisces', 'taurus', 'virgo'],
     },
     leo: {
         sign: 'leo',
@@ -59,7 +79,11 @@ export const ZODIAC_SIGNS: Record<ZodiacSign, ZodiacInfo> = {
         emoji: '♌',
         element: 'fire',
         dates: '23 Temmuz - 22 Ağustos',
-        color: '#F4A261',
+        color: '#F97316',
+        rulingPlanet: 'Güneş',
+        strengths: 'Özgüvenli, cömert, yaratıcı ve sıcak',
+        growthAreas: 'Eleştiriye açıklık ve dinleme',
+        compatibleSigns: ['aries', 'sagittarius', 'gemini', 'libra'],
     },
     virgo: {
         sign: 'virgo',
@@ -68,7 +92,11 @@ export const ZODIAC_SIGNS: Record<ZodiacSign, ZodiacInfo> = {
         emoji: '♍',
         element: 'earth',
         dates: '23 Ağustos - 22 Eylül',
-        color: '#2A9D8F',
+        color: '#059669',
+        rulingPlanet: 'Merkür',
+        strengths: 'Analitik, özenli, düzenli ve yardımsever',
+        growthAreas: 'Kendine karşı şefkat ve esneklik',
+        compatibleSigns: ['taurus', 'capricorn', 'cancer', 'scorpio'],
     },
     libra: {
         sign: 'libra',
@@ -77,7 +105,11 @@ export const ZODIAC_SIGNS: Record<ZodiacSign, ZodiacInfo> = {
         emoji: '♎',
         element: 'air',
         dates: '23 Eylül - 22 Ekim',
-        color: '#E76F51',
+        color: '#EC4899',
+        rulingPlanet: 'Venüs',
+        strengths: 'Dengeli, diplomatik, estetik ve adil',
+        growthAreas: 'Kararlılık ve kendi öncelikleri',
+        compatibleSigns: ['gemini', 'aquarius', 'leo', 'sagittarius'],
     },
     scorpio: {
         sign: 'scorpio',
@@ -86,7 +118,11 @@ export const ZODIAC_SIGNS: Record<ZodiacSign, ZodiacInfo> = {
         emoji: '♏',
         element: 'water',
         dates: '23 Ekim - 21 Kasım',
-        color: '#8B5A8D',
+        color: '#9333EA',
+        rulingPlanet: 'Plüton',
+        strengths: 'Tutkulu, kararlı, derin ve sezgisel',
+        growthAreas: 'Güven ve kontrolü bırakabilme',
+        compatibleSigns: ['cancer', 'pisces', 'virgo', 'capricorn'],
     },
     sagittarius: {
         sign: 'sagittarius',
@@ -95,7 +131,11 @@ export const ZODIAC_SIGNS: Record<ZodiacSign, ZodiacInfo> = {
         emoji: '♐',
         element: 'fire',
         dates: '22 Kasım - 21 Aralık',
-        color: '#9B59B6',
+        color: '#8B5CF6',
+        rulingPlanet: 'Jüpiter',
+        strengths: 'İyimser, özgür ruhlu, vizyoner',
+        growthAreas: 'Sabır ve detaylara özen',
+        compatibleSigns: ['aries', 'leo', 'libra', 'aquarius'],
     },
     capricorn: {
         sign: 'capricorn',
@@ -104,7 +144,11 @@ export const ZODIAC_SIGNS: Record<ZodiacSign, ZodiacInfo> = {
         emoji: '♑',
         element: 'earth',
         dates: '22 Aralık - 19 Ocak',
-        color: '#34495E',
+        color: '#475569',
+        rulingPlanet: 'Satürn',
+        strengths: 'Disiplinli, sorumlu ve güvenilir',
+        growthAreas: 'Duyguları ifade etme ve dinlenme',
+        compatibleSigns: ['taurus', 'virgo', 'scorpio', 'pisces'],
     },
     aquarius: {
         sign: 'aquarius',
@@ -113,7 +157,11 @@ export const ZODIAC_SIGNS: Record<ZodiacSign, ZodiacInfo> = {
         emoji: '♒',
         element: 'air',
         dates: '20 Ocak - 18 Şubat',
-        color: '#3498DB',
+        color: '#3B82F6',
+        rulingPlanet: 'Uranüs',
+        strengths: 'Özgün, yenilikçi, insancıl ve zeki',
+        growthAreas: 'Duygusal yakınlık kurma',
+        compatibleSigns: ['gemini', 'libra', 'aries', 'sagittarius'],
     },
     pisces: {
         sign: 'pisces',
@@ -122,7 +170,11 @@ export const ZODIAC_SIGNS: Record<ZodiacSign, ZodiacInfo> = {
         emoji: '♓',
         element: 'water',
         dates: '19 Şubat - 20 Mart',
-        color: '#1ABC9C',
+        color: '#14B8A6',
+        rulingPlanet: 'Neptün',
+        strengths: 'Empatik, yaratıcı, nazik ve sezgisel',
+        growthAreas: 'Gerçekçi sınırlar çizme',
+        compatibleSigns: ['cancer', 'scorpio', 'taurus', 'capricorn'],
     },
 };
 
@@ -145,15 +197,15 @@ export function getZodiacSign(birthDate: Date): ZodiacSign {
     return 'pisces';
 }
 
-// Calculate compatibility percentage between two signs
+// Calculate compatibility percentage between two signs (deterministic)
 export function calculateCompatibility(sign1: ZodiacSign, sign2: ZodiacSign): number {
     const info1 = ZODIAC_SIGNS[sign1];
     const info2 = ZODIAC_SIGNS[sign2];
 
-    // Same element = high compatibility
-    if (info1.element === info2.element) return 85 + Math.floor(Math.random() * 10);
+    if (sign1 === sign2) return 86;
+    if (info1.compatibleSigns.includes(sign2)) return 91;
+    if (info1.element === info2.element) return 88;
 
-    // Compatible elements
     const compatible: Record<string, string[]> = {
         fire: ['air'],
         air: ['fire'],
@@ -162,11 +214,10 @@ export function calculateCompatibility(sign1: ZodiacSign, sign2: ZodiacSign): nu
     };
 
     if (compatible[info1.element]?.includes(info2.element)) {
-        return 70 + Math.floor(Math.random() * 15);
+        return 82;
     }
 
-    // Neutral compatibility
-    return 50 + Math.floor(Math.random() * 20);
+    return 66;
 }
 
 // Rising sign lookup table based on sun sign and birth time

@@ -576,4 +576,424 @@ export class CyclesService {
       },
     });
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // Admin Endpoints
+  // ─────────────────────────────────────────────────────────────
+
+  async getAdminCycles(options: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: string;
+  }) {
+    const page = Math.max(1, options.page || 1);
+    const limit = Math.min(100, Math.max(1, options.limit || 10));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (options.status === 'ongoing') {
+      where.endDate = null;
+    } else if (options.status === 'completed') {
+      where.endDate = { not: null };
+    }
+
+    if (options.search?.trim()) {
+      const q = options.search.trim();
+      where.user = {
+        OR: [
+          { email: { contains: q, mode: 'insensitive' } },
+          { username: { contains: q, mode: 'insensitive' } },
+        ],
+      };
+    }
+
+    const [cycles, total, allCompleted, ongoingCount, totalDailyLogs] = await Promise.all([
+      this.prisma.periodCycle.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              username: true,
+            },
+          },
+        },
+        orderBy: { startDate: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.periodCycle.count({ where }),
+      this.prisma.periodCycle.findMany({
+        where: { endDate: { not: null } },
+        select: { startDate: true, endDate: true },
+      }),
+      this.prisma.periodCycle.count({ where: { endDate: null } }),
+      this.prisma.dailyLog.count(),
+    ]);
+
+    const avgDurationDays =
+      allCompleted.length > 0
+        ? Math.round(
+            (allCompleted.reduce((sum, c) => {
+              const diff =
+                Math.floor(
+                  (new Date(c.endDate!).getTime() - new Date(c.startDate).getTime()) /
+                    (1000 * 60 * 60 * 24),
+                ) + 1;
+              return sum + Math.max(1, diff);
+            }, 0) /
+              allCompleted.length) *
+              10,
+          ) / 10
+        : 0;
+
+    return {
+      data: cycles,
+      total,
+      page,
+      limit,
+      stats: {
+        totalCycles: allCompleted.length + ongoingCount,
+        ongoingCycles: ongoingCount,
+        completedCycles: allCompleted.length,
+        avgDurationDays,
+        totalDailyLogs,
+      },
+    };
+  }
+
+  async getAdminCycleById(cycleId: string) {
+    const cycle = await this.prisma.periodCycle.findUnique({
+      where: { id: cycleId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+          },
+        },
+      },
+    });
+
+    if (!cycle) {
+      return null;
+    }
+
+    const rangeStart = new Date(cycle.startDate);
+    rangeStart.setHours(0, 0, 0, 0);
+    const rangeEnd = cycle.endDate
+      ? new Date(cycle.endDate)
+      : new Date(rangeStart.getTime() + 14 * 24 * 60 * 60 * 1000);
+    rangeEnd.setHours(23, 59, 59, 999);
+
+    const dailyLogs = await this.prisma.dailyLog.findMany({
+      where: {
+        userId: cycle.userId,
+        date: {
+          gte: rangeStart,
+          lte: rangeEnd,
+        },
+      },
+      orderBy: { date: 'desc' },
+    });
+
+    return {
+      ...cycle,
+      dailyLogs,
+    };
+  }
+
+  /**
+   * Analyze cycle, symptom, sleep and hydration correlations for actionable insights
+   */
+  async getPatternInsights(userId: string) {
+    const lookback90 = new Date();
+    lookback90.setDate(lookback90.getDate() - 90);
+
+    const [cycles, dailyLogs, sleepLogs, waterLogs] = await Promise.all([
+      this.prisma.periodCycle.findMany({
+        where: { userId },
+        orderBy: { startDate: 'desc' },
+        take: 7,
+      }),
+      this.prisma.dailyLog.findMany({
+        where: { userId, date: { gte: lookback90 } },
+        orderBy: { date: 'desc' },
+      }),
+      this.prisma.sleepLog.findMany({
+        where: { userId, sleepDate: { gte: lookback90 } },
+        orderBy: { sleepDate: 'desc' },
+      }),
+      this.prisma.waterLog.findMany({
+        where: { userId, loggedAt: { gte: lookback90 } },
+      }),
+    ]);
+
+    // 1. Cycle history (newest -> oldest -> chart expects chronological order)
+    const cycleHistory: Array<{
+      startDate: string;
+      cycleLength: number;
+      periodLength: number | null;
+    }> = [];
+
+    for (let i = 0; i < cycles.length - 1; i++) {
+      const currStart = new Date(cycles[i].startDate);
+      const prevStart = new Date(cycles[i + 1].startDate);
+      const cycleLength = Math.round(
+        (currStart.getTime() - prevStart.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      if (cycleLength >= 15 && cycleLength <= 60) {
+        const prevEnd = cycles[i + 1].endDate ? new Date(cycles[i + 1].endDate!) : null;
+        const periodLength = prevEnd
+          ? Math.max(
+              1,
+              Math.round((prevEnd.getTime() - prevStart.getTime()) / (1000 * 60 * 60 * 24)) + 1,
+            )
+          : null;
+        cycleHistory.push({
+          startDate: prevStart.toISOString().slice(0, 10),
+          cycleLength,
+          periodLength,
+        });
+      }
+    }
+    cycleHistory.reverse();
+
+    // 2. Pre-period symptoms (1-5 days before period start)
+    const prePeriodCounts = new Map<string, number>();
+    const allSymptomCounts = new Map<string, number>();
+    const moodCounts = new Map<string, number>();
+
+    for (const log of dailyLogs) {
+      const logDate = new Date(log.date);
+      logDate.setHours(0, 0, 0, 0);
+
+      const isPrePeriod = cycles.some((c) => {
+        const start = new Date(c.startDate);
+        start.setHours(0, 0, 0, 0);
+        const diffDays = Math.round((start.getTime() - logDate.getTime()) / (1000 * 60 * 60 * 24));
+        return diffDays >= 1 && diffDays <= 5;
+      });
+
+      const symptoms = Array.isArray(log.symptoms) ? (log.symptoms as string[]) : [];
+      const moods = Array.isArray(log.mood) ? (log.mood as string[]) : [];
+
+      for (const s of symptoms) {
+        allSymptomCounts.set(s, (allSymptomCounts.get(s) || 0) + 1);
+        if (isPrePeriod) {
+          prePeriodCounts.set(s, (prePeriodCounts.get(s) || 0) + 1);
+        }
+      }
+      for (const m of moods) {
+        moodCounts.set(m, (moodCounts.get(m) || 0) + 1);
+      }
+    }
+
+    const topPrePeriodSymptoms = Array.from(prePeriodCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name, count]) => ({ name, count }));
+
+    const topSymptoms = Array.from(allSymptomCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([name, count]) => ({ name, count }));
+
+    const topMoods = Array.from(moodCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name, count]) => ({ name, count }));
+
+    // 3. Sleep vs Cramp correlation
+    const sleepByDate = new Map<string, number>();
+    for (const s of sleepLogs) {
+      const key = new Date(s.sleepDate).toISOString().slice(0, 10);
+      sleepByDate.set(key, s.durationMin);
+    }
+
+    const crampsGoodSleep: number[] = [];
+    const crampsLowSleep: number[] = [];
+    for (const log of dailyLogs) {
+      if (typeof log.cramps !== 'number' || log.cramps <= 0) continue;
+      const key = new Date(log.date).toISOString().slice(0, 10);
+      const sleepMin = sleepByDate.get(key);
+      if (sleepMin === undefined) continue;
+      if (sleepMin >= 420) crampsGoodSleep.push(log.cramps);
+      else crampsLowSleep.push(log.cramps);
+    }
+
+    const avgGoodSleepCramps =
+      crampsGoodSleep.length > 0
+        ? Number((crampsGoodSleep.reduce((a, b) => a + b, 0) / crampsGoodSleep.length).toFixed(1))
+        : null;
+    const avgLowSleepCramps =
+      crampsLowSleep.length > 0
+        ? Number((crampsLowSleep.reduce((a, b) => a + b, 0) / crampsLowSleep.length).toFixed(1))
+        : null;
+
+    // 4. Water daily average & insight
+    const waterByDate = new Map<string, number>();
+    for (const w of waterLogs) {
+      const key = new Date(w.loggedAt).toISOString().slice(0, 10);
+      waterByDate.set(key, (waterByDate.get(key) || 0) + w.amountMl);
+    }
+    const avgWaterMl =
+      waterByDate.size > 0
+        ? Math.round(
+            Array.from(waterByDate.values()).reduce((a, b) => a + b, 0) / waterByDate.size,
+          )
+        : 0;
+
+    // Build human-readable summary insights
+    const insights: Array<{
+      id: string;
+      icon: string;
+      title: string;
+      description: string;
+      tone: 'pink' | 'purple' | 'teal' | 'amber';
+    }> = [];
+
+    if (topPrePeriodSymptoms.length > 0) {
+      const names = topPrePeriodSymptoms.map((s) => s.name).join(', ');
+      insights.push({
+        id: 'pre_period_pattern',
+        icon: 'sparkles',
+        title: 'PMS Örüntüsü Yakalandı',
+        description: `Regl başlamadan 1-5 gün önce en sık şu belirtileri kaydediyorsun: ${names}.`,
+        tone: 'purple',
+      });
+    }
+
+    if (avgGoodSleepCramps !== null && avgLowSleepCramps !== null) {
+      if (avgGoodSleepCramps < avgLowSleepCramps) {
+        const diffPct = Math.round(((avgLowSleepCramps - avgGoodSleepCramps) / avgLowSleepCramps) * 100);
+        insights.push({
+          id: 'sleep_cramp_correlation',
+          icon: 'moon',
+          title: 'Uyku & Kramp İlişkisi',
+          description: `7+ saat uyuduğun günlerde kramp şiddetin %${Math.max(5, diffPct)} daha düşük (${avgGoodSleepCramps}/5 vs ${avgLowSleepCramps}/5).`,
+          tone: 'teal',
+        });
+      }
+    }
+
+    if (cycleHistory.length >= 2) {
+      const lengths = cycleHistory.map((c) => c.cycleLength);
+      const minLen = Math.min(...lengths);
+      const maxLen = Math.max(...lengths);
+      const spread = maxLen - minLen;
+      insights.push({
+        id: 'cycle_regularity',
+        icon: 'pulse',
+        title: spread <= 3 ? 'Döngü Rimin Çok İstikrarlı' : 'Döngü Değişkenliği Gözlemi',
+        description: `Son ${cycleHistory.length} döngün ${minLen}-${maxLen} gün aralığında gerçekleşti (${spread <= 3 ? 'düzenli ritim' : `${spread} günlük sapma`}).`,
+        tone: 'pink',
+      });
+    }
+
+    if (avgWaterMl > 0) {
+      insights.push({
+        id: 'hydration_summary',
+        icon: 'water',
+        title: 'Hidrasyon Ortalaman',
+        description:
+          avgWaterMl >= 1800
+            ? `Son dönem günlük ortalama ${avgWaterMl} ml su içiyorsun — krampları azaltmak için harika!`
+            : `Günlük ortalama ${avgWaterMl} ml su içiyorsun. 2000 ml hedefi şişkinliği azaltmaya yardımcı olur.`,
+        tone: 'amber',
+      });
+    }
+
+    if (insights.length === 0) {
+      insights.push({
+        id: 'keep_logging',
+        icon: 'analytics',
+        title: 'Kişisel Örüntülerin Oluşuyor',
+        description:
+          'Birkaç gün daha semptom, uyku ve su verisi girdiğinde sana özel PMS ve kramp korelasyonların burada belirecek.',
+        tone: 'purple',
+      });
+    }
+
+    // Build upcoming 3 cycles projection for long-term planning (Premium)
+    const avgCycleLen =
+      cycleHistory.length > 0
+        ? Math.round(
+            cycleHistory.reduce((acc, c) => acc + c.cycleLength, 0) / cycleHistory.length,
+          )
+        : 28;
+    const completedPeriods = cycleHistory.filter((c) => typeof c.periodLength === 'number');
+    const avgPeriodLen =
+      completedPeriods.length > 0
+        ? Math.round(
+            completedPeriods.reduce((acc, c) => acc + (c.periodLength || 5), 0) /
+              completedPeriods.length,
+          )
+        : 5;
+
+    const upcoming3Cycles: Array<{
+      cycleNumber: number;
+      startDate: string;
+      endDate: string;
+      ovulationDate: string;
+      fertileStart: string;
+      fertileEnd: string;
+    }> = [];
+
+    if (cycles.length > 0) {
+      const latestStart = new Date(cycles[0].startDate);
+      const todayMidnight = new Date();
+      todayMidnight.setHours(0, 0, 0, 0);
+
+      let cursorStart = new Date(latestStart);
+      cursorStart.setHours(0, 0, 0, 0);
+      while (cursorStart.getTime() <= todayMidnight.getTime()) {
+        cursorStart.setDate(cursorStart.getDate() + avgCycleLen);
+      }
+
+      for (let idx = 0; idx < 3; idx++) {
+        const start = new Date(cursorStart);
+        start.setDate(cursorStart.getDate() + idx * avgCycleLen);
+        const end = new Date(start);
+        end.setDate(start.getDate() + avgPeriodLen - 1);
+
+        const nextStart = new Date(start);
+        nextStart.setDate(start.getDate() + avgCycleLen);
+        const ovulation = new Date(nextStart);
+        ovulation.setDate(nextStart.getDate() - 14);
+        const fertileStart = new Date(ovulation);
+        fertileStart.setDate(ovulation.getDate() - 5);
+        const fertileEnd = new Date(ovulation);
+        fertileEnd.setDate(ovulation.getDate() + 1);
+
+        upcoming3Cycles.push({
+          cycleNumber: idx + 1,
+          startDate: start.toISOString().slice(0, 10),
+          endDate: end.toISOString().slice(0, 10),
+          ovulationDate: ovulation.toISOString().slice(0, 10),
+          fertileStart: fertileStart.toISOString().slice(0, 10),
+          fertileEnd: fertileEnd.toISOString().slice(0, 10),
+        });
+      }
+    }
+
+    return {
+      totalLogsAnalyzed: dailyLogs.length,
+      cycleHistory,
+      upcoming3Cycles,
+      topPrePeriodSymptoms,
+      topSymptoms,
+      topMoods,
+      sleepCrampCorrelation: {
+        avgGoodSleepCramps,
+        avgLowSleepCramps,
+        sampleCount: crampsGoodSleep.length + crampsLowSleep.length,
+      },
+      avgWaterMl,
+      insights,
+    };
+  }
 }

@@ -55,15 +55,38 @@ export class VoteService {
             },
         });
 
-        // Eğer aynı oy varsa, hiçbir şey yapma
+        // Eğer aynı oy varsa, oyunu geri çek (toggle off)
         if (existingVote && existingVote.voteType === voteType) {
-            const voteCount = await this.getAnswerVoteCount(answerId);
+            const reputationReason = existingVote.voteType === VoteType.UPVOTE
+                ? 'ANSWER_UPVOTED'
+                : 'ANSWER_DOWNVOTED';
+            const points = existingVote.voteType === VoteType.UPVOTE ? -5 : 2;
+            await this.reputationService.addReputationPoints(
+                answer.userId,
+                reputationReason as any,
+                { answerId, points },
+            );
+
+            await this.prisma.answerVote.delete({
+                where: {
+                    answerId_userId: {
+                        answerId,
+                        userId,
+                    },
+                },
+            });
+
+            const delta = existingVote.voteType === VoteType.UPVOTE ? -1 : 1;
+            const voteCount = await this.adjustAnswerVoteCount(answerId, delta);
+
             return {
                 success: true,
                 voteCount,
-                userVote: voteType,
+                userVote: null as any,
             };
         }
+
+        let voteDelta = 0;
 
         // Eğer farklı bir oy varsa, güncelle (Requirement 5.3)
         if (existingVote && existingVote.voteType !== voteType) {
@@ -99,6 +122,8 @@ export class VoteService {
                 newReputationReason as any,
                 { answerId },
             );
+
+            voteDelta = voteType === VoteType.UPVOTE ? 2 : -2;
         } else {
             // Yeni oy oluştur
             await this.prisma.answerVote.create({
@@ -118,10 +143,12 @@ export class VoteService {
                 reputationReason as any,
                 { answerId },
             );
+
+            voteDelta = voteType === VoteType.UPVOTE ? 1 : -1;
         }
 
         // Vote count'u güncelle (Requirement 5.4)
-        const voteCount = await this.updateAnswerVoteCount(answerId);
+        const voteCount = await this.adjustAnswerVoteCount(answerId, voteDelta);
 
         // Send notification for upvotes (async, don't wait)
         if (voteType === VoteType.UPVOTE) {
@@ -191,7 +218,8 @@ export class VoteService {
         });
 
         // Vote count'u güncelle
-        const voteCount = await this.updateAnswerVoteCount(answerId);
+        const delta = existingVote.voteType === VoteType.UPVOTE ? -1 : 1;
+        const voteCount = await this.adjustAnswerVoteCount(answerId, delta);
 
         return {
             success: true,
@@ -251,6 +279,20 @@ export class VoteService {
      * Cevabın vote count'unu güncelle
      * Requirements: 5.4
      */
+    /**
+     * Cevabın vote count'unu delta kadar güncelle (seed/mevcut oyları korur)
+     * Requirements: 5.4
+     */
+    private async adjustAnswerVoteCount(answerId: string, delta: number): Promise<number> {
+        const updated = await this.prisma.answer.update({
+            where: { id: answerId },
+            data: { voteCount: { increment: delta } },
+            select: { voteCount: true },
+        });
+
+        return updated.voteCount;
+    }
+
     private async updateAnswerVoteCount(answerId: string): Promise<number> {
         const voteCount = await this.getAnswerVoteCount(answerId);
 

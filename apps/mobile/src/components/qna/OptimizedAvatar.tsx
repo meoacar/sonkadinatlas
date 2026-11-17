@@ -1,6 +1,7 @@
 import React, { useState, memo } from 'react';
 import { View, Text, StyleSheet, Image, ActivityIndicator } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
+import { resolveAvatarSource } from '@/utils/avatar';
 
 interface OptimizedAvatarProps {
     imageUrl?: string | null;
@@ -40,8 +41,10 @@ export const OptimizedAvatar = memo(function OptimizedAvatar({
         );
     }
 
+    const resolvedSource = resolveAvatarSource(imageUrl);
+    const isLocalAsset = typeof resolvedSource === 'number';
     // Show initials if no image or error
-    const showInitials = !imageUrl || hasError;
+    const showInitials = !resolvedSource || hasError;
     const initial = displayName?.charAt(0).toUpperCase() || '?';
 
     return (
@@ -53,9 +56,11 @@ export const OptimizedAvatar = memo(function OptimizedAvatar({
             ) : (
                 <>
                     <Image
-                        source={{ uri: imageUrl }}
+                        source={resolvedSource}
                         style={styles.image}
-                        onLoadStart={() => setIsLoading(true)}
+                        onLoadStart={() => {
+                            if (!isLocalAsset) setIsLoading(true);
+                        }}
                         onLoadEnd={() => setIsLoading(false)}
                         onError={() => {
                             setIsLoading(false);
@@ -65,7 +70,7 @@ export const OptimizedAvatar = memo(function OptimizedAvatar({
                         resizeMode="cover"
                         fadeDuration={200}
                     />
-                    {isLoading && (
+                    {isLoading && !isLocalAsset && (
                         <View style={styles.loadingOverlay}>
                             <ActivityIndicator size="small" color={theme.colors.primary} />
                         </View>

@@ -8,8 +8,10 @@ import {
   TextInput,
   Switch,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useState, useEffect } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { cyclesService } from '@/services/api';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -23,6 +25,7 @@ interface DayDetailsSheetProps {
   isFertile?: boolean;
   isPredicted?: boolean;
   isOvulation?: boolean;
+  onLogPeriodStart?: () => void;
 }
 
 const commonSymptoms = [
@@ -35,14 +38,14 @@ const commonSymptoms = [
   'Akıntı',
 ];
 
-const commonMoods = [
-  'Mutlu',
-  'Üzgün',
-  'Sinirli',
-  'Anksiyetli',
-  'Enerjik',
-  'Sakin',
-  'Huzursuz',
+const commonMoods: Array<{ label: string; emoji: string }> = [
+  { label: 'Mutlu', emoji: '😊' },
+  { label: 'Sakin', emoji: '😌' },
+  { label: 'Enerjik', emoji: '⚡' },
+  { label: 'Üzgün', emoji: '😔' },
+  { label: 'Sinirli', emoji: '😠' },
+  { label: 'Anksiyetli', emoji: '😰' },
+  { label: 'Huzursuz', emoji: '😣' },
 ];
 
 const contraceptionTypes = [
@@ -61,12 +64,12 @@ export function DayDetailsSheet({
   isFertile,
   isPredicted,
   isOvulation,
+  onLogPeriodStart,
 }: DayDetailsSheetProps) {
   const theme = useTheme();
   const queryClient = useQueryClient();
   const styles = createStyles(theme);
 
-  // Form state
   const [flow, setFlow] = useState<'light' | 'moderate' | 'heavy' | undefined>();
   const [cramps, setCramps] = useState<number>(0);
   const [symptoms, setSymptoms] = useState<string[]>([]);
@@ -77,7 +80,6 @@ export function DayDetailsSheet({
   const [medications, setMedications] = useState<string[]>([]);
   const [healthNotes, setHealthNotes] = useState('');
 
-  // Load existing data
   useEffect(() => {
     if (visible && dayData?.dailyLog) {
       const log = dayData.dailyLog;
@@ -91,7 +93,6 @@ export function DayDetailsSheet({
       setMedications(log.medications || []);
       setHealthNotes(log.healthNotes || '');
     } else if (visible) {
-      // Reset form for new entry
       setFlow(isPeriod ? 'moderate' : undefined);
       setCramps(0);
       setSymptoms([]);
@@ -102,14 +103,13 @@ export function DayDetailsSheet({
       setMedications([]);
       setHealthNotes('');
     }
-  }, [visible, dayData]);
+  }, [visible, dayData, isPeriod]);
 
   const saveMutation = useMutation({
     mutationFn: (data: any) => cyclesService.upsertDailyLog(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['calendar'] });
-      queryClient.invalidateQueries({ queryKey: ['homeSnapshot'] }); // Streak güncellemesi için
-      Alert.alert('Başarılı', 'Günlük kayıt güncellendi');
+      queryClient.invalidateQueries({ queryKey: ['homeSnapshot'] });
       onClose();
     },
     onError: (error: any) => {
@@ -118,7 +118,6 @@ export function DayDetailsSheet({
   });
 
   const handleSave = () => {
-    // Format date as YYYY-MM-DD in local timezone
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
@@ -137,7 +136,6 @@ export function DayDetailsSheet({
       healthNotes: healthNotes.trim() || undefined,
     };
 
-    console.log('Saving daily log:', data);
     saveMutation.mutate(data);
   };
 
@@ -165,158 +163,218 @@ export function DayDetailsSheet({
       onRequestClose={onClose}
     >
       <View style={styles.container}>
+        <View style={styles.grabberRow}>
+          <View style={styles.grabber} />
+        </View>
+
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose}>
-            <Text style={styles.cancelButton}>İptal</Text>
+          <TouchableOpacity onPress={onClose} style={styles.cancelButton}>
+            <Text style={styles.cancelButtonText}>Vazgeç</Text>
           </TouchableOpacity>
-          <Text style={styles.title}>{formatDate(date)}</Text>
-          <TouchableOpacity onPress={handleSave} disabled={saveMutation.isPending}>
-            <Text style={[styles.saveButton, saveMutation.isPending && styles.saveButtonDisabled]}>
-              Kaydet
-            </Text>
+          <Text style={styles.title} numberOfLines={1}>
+            {formatDate(date)}
+          </Text>
+          <TouchableOpacity
+            onPress={handleSave}
+            disabled={saveMutation.isPending}
+            style={[
+              styles.savePill,
+              saveMutation.isPending && styles.saveButtonDisabled,
+            ]}
+          >
+            {saveMutation.isPending ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.savePillText}>Kaydet</Text>
+            )}
           </TouchableOpacity>
         </View>
 
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
           {/* Status Chips */}
-          <View style={styles.statusChips}>
-            {isPeriod && (
-              <View style={[styles.chip, { backgroundColor: '#FFE8F0' }]}>
-                <Text style={[styles.chipText, { color: '#FF1493' }]}>🩸 Regl Günü</Text>
-              </View>
-            )}
-            {isFertile && (
-              <View style={[styles.chip, { backgroundColor: '#F3E5F5' }]}>
-                <Text style={[styles.chipText, { color: '#9C27B0' }]}>🌸 Verimli Gün</Text>
-              </View>
-            )}
-            {isOvulation && (
-              <View style={[styles.chip, { backgroundColor: '#FFF9C4' }]}>
-                <Text style={[styles.chipText, { color: '#F57F17' }]}>⭐ Yumurtlama</Text>
-              </View>
-            )}
-            {isPredicted && (
-              <View style={[styles.chip, { backgroundColor: '#FFE8F0' }]}>
-                <Text style={[styles.chipText, { color: '#FF69B4' }]}>📅 Tahmin</Text>
-              </View>
-            )}
-          </View>
+          {(isPeriod || isFertile || isOvulation || isPredicted) && (
+            <View style={styles.statusChips}>
+              {isPeriod && (
+                <View style={[styles.chip, { backgroundColor: 'rgba(255, 77, 141, 0.14)' }]}>
+                  <Ionicons name="water" size={13} color="#FF4D8D" />
+                  <Text style={[styles.chipText, { color: '#FF4D8D' }]}>Regl Günü</Text>
+                </View>
+              )}
+              {isFertile && (
+                <View style={[styles.chip, { backgroundColor: 'rgba(168, 85, 247, 0.14)' }]}>
+                  <Ionicons name="flower-outline" size={13} color="#A855F7" />
+                  <Text style={[styles.chipText, { color: '#A855F7' }]}>Verimli Gün</Text>
+                </View>
+              )}
+              {isOvulation && (
+                <View style={[styles.chip, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
+                  <Ionicons name="sparkles" size={13} color="#D97706" />
+                  <Text style={[styles.chipText, { color: '#D97706' }]}>Yumurtlama</Text>
+                </View>
+              )}
+              {isPredicted && (
+                <View style={[styles.chip, { backgroundColor: 'rgba(255, 77, 141, 0.12)' }]}>
+                  <Ionicons name="calendar-outline" size={13} color="#FF4D8D" />
+                  <Text style={[styles.chipText, { color: '#FF4D8D' }]}>Tahmini Başlangıç</Text>
+                </View>
+              )}
+            </View>
+          )}
 
-          {/* Period Section */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Regl Detayları</Text>
+          {/* Quick Period Log Action */}
+          {!isPeriod && onLogPeriodStart && (
+            <TouchableOpacity
+              style={styles.periodBanner}
+              onPress={onLogPeriodStart}
+              activeOpacity={0.85}
+            >
+              <View style={styles.periodBannerLeft}>
+                <View style={styles.periodBannerIcon}>
+                  <Ionicons name="water" size={18} color="#FF4D8D" />
+                </View>
+                <View>
+                  <Text style={styles.periodBannerTitle}>Reglin Bugün mü Başladı?</Text>
+                  <Text style={styles.periodBannerSub}>Tek dokunuşla döngü başlangıcı kaydet</Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#FF4D8D" />
+            </TouchableOpacity>
+          )}
+
+          {/* Period Details Card */}
+          <View style={styles.card}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="water-outline" size={18} color={theme.colors.primary} />
+              <Text style={styles.sectionTitle}>Regl & Kramp</Text>
+            </View>
 
             <Text style={styles.label}>Akış Yoğunluğu</Text>
             <View style={styles.flowButtons}>
-              {['light', 'moderate', 'heavy'].map((level) => (
-                <TouchableOpacity
-                  key={level}
-                  style={[
-                    styles.flowButton,
-                    flow === level && styles.flowButtonActive,
-                  ]}
-                  onPress={() => setFlow(level as any)}
-                >
-                  <Text
-                    style={[
-                      styles.flowButtonText,
-                      flow === level && styles.flowButtonTextActive,
-                    ]}
+              {(['light', 'moderate', 'heavy'] as const).map((level) => {
+                const isActive = flow === level;
+                return (
+                  <TouchableOpacity
+                    key={level}
+                    style={[styles.flowButton, isActive && styles.flowButtonActive]}
+                    onPress={() => setFlow(isActive ? undefined : level)}
+                    activeOpacity={0.8}
                   >
-                    {level === 'light' ? 'Hafif' : level === 'moderate' ? 'Orta' : 'Yoğun'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              {flow && (
-                <TouchableOpacity
-                  style={styles.flowButton}
-                  onPress={() => setFlow(undefined)}
-                >
-                  <Text style={styles.flowButtonText}>✕</Text>
-                </TouchableOpacity>
-              )}
+                    <Text
+                      style={[
+                        styles.flowButtonText,
+                        isActive && styles.flowButtonTextActive,
+                      ]}
+                    >
+                      {level === 'light' ? 'Hafif' : level === 'moderate' ? 'Orta' : 'Yoğun'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
-            <Text style={styles.label}>Kramp Şiddeti (0-5)</Text>
+            <Text style={styles.label}>Kramp Şiddeti (0 – 5)</Text>
             <View style={styles.crampsSlider}>
-              {[0, 1, 2, 3, 4, 5].map((level) => (
-                <TouchableOpacity
-                  key={level}
-                  style={[
-                    styles.crampsButton,
-                    cramps === level && styles.crampsButtonActive,
-                  ]}
-                  onPress={() => setCramps(level)}
-                >
-                  <Text
-                    style={[
-                      styles.crampsButtonText,
-                      cramps === level && styles.crampsButtonTextActive,
-                    ]}
+              {[0, 1, 2, 3, 4, 5].map((level) => {
+                const isActive = cramps === level;
+                return (
+                  <TouchableOpacity
+                    key={level}
+                    style={[styles.crampsButton, isActive && styles.crampsButtonActive]}
+                    onPress={() => setCramps(level)}
+                    activeOpacity={0.8}
                   >
-                    {level}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      style={[
+                        styles.crampsButtonText,
+                        isActive && styles.crampsButtonTextActive,
+                      ]}
+                    >
+                      {level}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
 
-          {/* Symptoms & Mood */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Semptomlar</Text>
+          {/* Symptoms Card */}
+          <View style={styles.card}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="medkit-outline" size={18} color="#F59E0B" />
+              <Text style={styles.sectionTitle}>Semptomlar</Text>
+            </View>
             <View style={styles.chipGroup}>
-              {commonSymptoms.map((symptom) => (
-                <TouchableOpacity
-                  key={symptom}
-                  style={[
-                    styles.selectableChip,
-                    symptoms.includes(symptom) && styles.selectableChipActive,
-                  ]}
-                  onPress={() => toggleArrayItem(symptoms, symptom, setSymptoms)}
-                >
-                  <Text
+              {commonSymptoms.map((symptom) => {
+                const isActive = symptoms.includes(symptom);
+                return (
+                  <TouchableOpacity
+                    key={symptom}
                     style={[
-                      styles.selectableChipText,
-                      symptoms.includes(symptom) && styles.selectableChipTextActive,
+                      styles.selectableChip,
+                      isActive && styles.selectableChipActive,
                     ]}
+                    onPress={() => toggleArrayItem(symptoms, symptom, setSymptoms)}
+                    activeOpacity={0.8}
                   >
-                    {symptom}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      style={[
+                        styles.selectableChipText,
+                        isActive && styles.selectableChipTextActive,
+                      ]}
+                    >
+                      {symptom}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Ruh Hali & Enerji</Text>
+          {/* Mood Card */}
+          <View style={styles.card}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="happy-outline" size={18} color="#8B5CF6" />
+              <Text style={styles.sectionTitle}>Ruh Hali & Enerji</Text>
+            </View>
             <View style={styles.chipGroup}>
-              {commonMoods.map((moodItem) => (
-                <TouchableOpacity
-                  key={moodItem}
-                  style={[
-                    styles.selectableChip,
-                    mood.includes(moodItem) && styles.selectableChipActive,
-                  ]}
-                  onPress={() => toggleArrayItem(mood, moodItem, setMood)}
-                >
-                  <Text
+              {commonMoods.map((moodItem) => {
+                const isActive = mood.includes(moodItem.label);
+                return (
+                  <TouchableOpacity
+                    key={moodItem.label}
                     style={[
-                      styles.selectableChipText,
-                      mood.includes(moodItem) && styles.selectableChipTextActive,
+                      styles.selectableChip,
+                      isActive && styles.selectableChipActive,
                     ]}
+                    onPress={() => toggleArrayItem(mood, moodItem.label, setMood)}
+                    activeOpacity={0.8}
                   >
-                    {moodItem}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      style={[
+                        styles.selectableChipText,
+                        isActive && styles.selectableChipTextActive,
+                      ]}
+                    >
+                      {moodItem.emoji} {moodItem.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
 
-          {/* Sex & Protection */}
-          <View style={styles.section}>
+          {/* Sex & Protection Card */}
+          <View style={styles.card}>
             <View style={styles.switchRow}>
-              <Text style={styles.sectionTitle}>Cinsel İlişki</Text>
+              <View style={styles.sectionHeaderInline}>
+                <Ionicons name="heart-outline" size={18} color="#F43F5E" />
+                <Text style={styles.sectionTitle}>Cinsel İlişki</Text>
+              </View>
               <Switch
                 value={hadSex}
                 onValueChange={setHadSex}
@@ -329,25 +387,29 @@ export function DayDetailsSheet({
               <>
                 <Text style={styles.label}>Korunma Yöntemi</Text>
                 <View style={styles.chipGroup}>
-                  {contraceptionTypes.map((type) => (
-                    <TouchableOpacity
-                      key={type}
-                      style={[
-                        styles.selectableChip,
-                        contraception.includes(type) && styles.selectableChipActive,
-                      ]}
-                      onPress={() => toggleArrayItem(contraception, type, setContraception)}
-                    >
-                      <Text
+                  {contraceptionTypes.map((type) => {
+                    const isActive = contraception.includes(type);
+                    return (
+                      <TouchableOpacity
+                        key={type}
                         style={[
-                          styles.selectableChipText,
-                          contraception.includes(type) && styles.selectableChipTextActive,
+                          styles.selectableChip,
+                          isActive && styles.selectableChipActive,
                         ]}
+                        onPress={() => toggleArrayItem(contraception, type, setContraception)}
+                        activeOpacity={0.8}
                       >
-                        {type}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                        <Text
+                          style={[
+                            styles.selectableChipText,
+                            isActive && styles.selectableChipTextActive,
+                          ]}
+                        >
+                          {type}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
 
                 <Text style={styles.label}>Notlar</Text>
@@ -356,7 +418,7 @@ export function DayDetailsSheet({
                   value={sexNotes}
                   onChangeText={setSexNotes}
                   placeholder="İsteğe bağlı notlar..."
-                  placeholderTextColor={theme.colors.textSecondary}
+                  placeholderTextColor={theme.colors.textLight}
                   multiline
                   numberOfLines={2}
                 />
@@ -364,16 +426,27 @@ export function DayDetailsSheet({
             )}
           </View>
 
-          {/* Medications & Health */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>İlaçlar & Sağlık</Text>
+          {/* Medications & Health Notes Card */}
+          <View style={styles.card}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="document-text-outline" size={18} color="#06B6D4" />
+              <Text style={styles.sectionTitle}>İlaçlar & Notlar</Text>
+            </View>
+
             <Text style={styles.label}>Aldığınız İlaçlar (virgülle ayırın)</Text>
             <TextInput
               style={styles.textInput}
               value={medications.join(', ')}
-              onChangeText={(text) => setMedications(text.split(',').map(s => s.trim()).filter(Boolean))}
+              onChangeText={(text) =>
+                setMedications(
+                  text
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                )
+              }
               placeholder="Örn: Ağrı kesici, Vitamin D"
-              placeholderTextColor={theme.colors.textSecondary}
+              placeholderTextColor={theme.colors.textLight}
             />
 
             <Text style={styles.label}>Sağlık Notları</Text>
@@ -382,14 +455,11 @@ export function DayDetailsSheet({
               value={healthNotes}
               onChangeText={setHealthNotes}
               placeholder="Genel sağlık durumu, bulgular vb."
-              placeholderTextColor={theme.colors.textSecondary}
+              placeholderTextColor={theme.colors.textLight}
               multiline
               numberOfLines={3}
             />
           </View>
-
-          {/* Spacer for bottom */}
-          <View style={{ height: 40 }} />
         </ScrollView>
       </View>
     </Modal>
@@ -402,78 +472,160 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       flex: 1,
       backgroundColor: theme.colors.background,
     },
+    grabberRow: {
+      alignItems: 'center',
+      paddingTop: 10,
+      paddingBottom: 4,
+      backgroundColor: theme.colors.backgroundCard,
+    },
+    grabber: {
+      width: 38,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: theme.colors.border,
+    },
     header: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      padding: 16,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
       borderBottomWidth: 1,
       borderBottomColor: theme.colors.border,
       backgroundColor: theme.colors.backgroundCard,
+      gap: 8,
     },
     title: {
-      fontSize: 16,
+      flex: 1,
+      fontSize: 15.5,
       fontWeight: '700',
       color: theme.colors.text,
+      textAlign: 'center',
     },
     cancelButton: {
-      fontSize: 16,
-      color: theme.colors.textSecondary,
+      paddingVertical: 6,
+      paddingHorizontal: 4,
     },
-    saveButton: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: theme.colors.primary,
+    cancelButtonText: {
+      fontSize: 15,
+      color: theme.colors.textSecondary,
+      fontWeight: '500',
+    },
+    savePill: {
+      backgroundColor: theme.colors.primary,
+      paddingHorizontal: 14,
+      paddingVertical: 7,
+      borderRadius: 16,
+      minWidth: 72,
+      alignItems: 'center',
+    },
+    savePillText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: '#FFFFFF',
     },
     saveButtonDisabled: {
-      opacity: 0.5,
+      opacity: 0.6,
     },
     content: {
       flex: 1,
     },
+    scrollContent: {
+      padding: 16,
+      gap: 12,
+      paddingBottom: 40,
+    },
     statusChips: {
       flexDirection: 'row',
       flexWrap: 'wrap',
-      padding: 16,
       gap: 8,
     },
     chip: {
-      paddingHorizontal: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 11,
       paddingVertical: 6,
-      borderRadius: 12,
+      borderRadius: 14,
     },
     chipText: {
-      fontSize: 13,
-      fontWeight: '600',
+      fontSize: 12.5,
+      fontWeight: '700',
     },
-    section: {
-      padding: 16,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
+    periodBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: 'rgba(255, 77, 141, 0.08)',
+      borderWidth: 1,
+      borderColor: 'rgba(255, 77, 141, 0.3)',
+      borderRadius: 16,
+      padding: 14,
     },
-    sectionTitle: {
-      fontSize: 16,
+    periodBannerLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      flex: 1,
+    },
+    periodBannerIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 12,
+      backgroundColor: 'rgba(255, 77, 141, 0.15)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    periodBannerTitle: {
+      fontSize: 14,
       fontWeight: '700',
       color: theme.colors.text,
+    },
+    periodBannerSub: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      marginTop: 1,
+    },
+    card: {
+      backgroundColor: theme.colors.backgroundCard,
+      borderRadius: 18,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    sectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
       marginBottom: 12,
     },
-    label: {
-      fontSize: 14,
-      fontWeight: '600',
+    sectionHeaderInline: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    sectionTitle: {
+      fontSize: 15.5,
+      fontWeight: '700',
       color: theme.colors.text,
+    },
+    label: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
       marginBottom: 8,
-      marginTop: 8,
+      marginTop: 6,
     },
     flowButtons: {
       flexDirection: 'row',
       gap: 8,
+      marginBottom: 8,
     },
     flowButton: {
       flex: 1,
       paddingVertical: 10,
-      paddingHorizontal: 12,
-      backgroundColor: theme.colors.backgroundCard,
-      borderRadius: 8,
+      backgroundColor: theme.colors.background,
+      borderRadius: 12,
       borderWidth: 1,
       borderColor: theme.colors.border,
       alignItems: 'center',
@@ -483,12 +635,12 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       borderColor: theme.colors.primary,
     },
     flowButtonText: {
-      fontSize: 14,
+      fontSize: 13.5,
       fontWeight: '600',
       color: theme.colors.text,
     },
     flowButtonTextActive: {
-      color: theme.colors.textOnPrimary,
+      color: '#FFFFFF',
     },
     crampsSlider: {
       flexDirection: 'row',
@@ -497,8 +649,8 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     crampsButton: {
       flex: 1,
       paddingVertical: 10,
-      backgroundColor: theme.colors.backgroundCard,
-      borderRadius: 8,
+      backgroundColor: theme.colors.background,
+      borderRadius: 12,
       borderWidth: 1,
       borderColor: theme.colors.border,
       alignItems: 'center',
@@ -509,11 +661,11 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     },
     crampsButtonText: {
       fontSize: 14,
-      fontWeight: '600',
+      fontWeight: '700',
       color: theme.colors.text,
     },
     crampsButtonTextActive: {
-      color: theme.colors.textOnPrimary,
+      color: '#FFFFFF',
     },
     chipGroup: {
       flexDirection: 'row',
@@ -521,10 +673,10 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       gap: 8,
     },
     selectableChip: {
-      paddingHorizontal: 12,
+      paddingHorizontal: 13,
       paddingVertical: 8,
-      backgroundColor: theme.colors.backgroundCard,
-      borderRadius: 12,
+      backgroundColor: theme.colors.background,
+      borderRadius: 16,
       borderWidth: 1,
       borderColor: theme.colors.border,
     },
@@ -534,30 +686,29 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     },
     selectableChipText: {
       fontSize: 13,
-      fontWeight: '500',
+      fontWeight: '600',
       color: theme.colors.text,
     },
     selectableChipTextActive: {
-      color: theme.colors.textOnPrimary,
+      color: '#FFFFFF',
     },
     switchRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: 12,
     },
     textInput: {
-      backgroundColor: theme.colors.backgroundCard,
+      backgroundColor: theme.colors.background,
       borderWidth: 1,
       borderColor: theme.colors.border,
-      borderRadius: 8,
+      borderRadius: 12,
       padding: 12,
       fontSize: 14,
       color: theme.colors.text,
       marginBottom: 8,
     },
     textInputMultiline: {
-      minHeight: 80,
+      minHeight: 76,
       textAlignVertical: 'top',
     },
   });

@@ -8,17 +8,20 @@ interface EmptyStateProps {
     type?: EmptyStateType;
     title?: string;
     message?: string;
-    icon?: any;
+    icon?: keyof typeof Ionicons.glyphMap;
     actionLabel?: string;
     onAction?: () => void;
     showAction?: boolean;
 }
 
-const EMPTY_STATE_CONFIGS: Record<EmptyStateType, { icon: any; title: string; message: string }> = {
+const EMPTY_STATE_CONFIGS: Record<
+    EmptyStateType,
+    { icon: keyof typeof Ionicons.glyphMap; title: string; message: string }
+> = {
     questions: {
         icon: 'chatbubbles-outline',
         title: 'Henüz Soru Yok',
-        message: 'İlk soruyu sormak için yukarıdaki butona tıklayın.',
+        message: 'İlk soruyu sorarak topluluk sohbetini başlatabilirsiniz.',
     },
     answers: {
         icon: 'chatbubble-ellipses-outline',
@@ -46,7 +49,7 @@ const EMPTY_STATE_CONFIGS: Record<EmptyStateType, { icon: any; title: string; me
         message: 'Arama kriterlerinizi değiştirerek tekrar deneyin.',
     },
     generic: {
-        icon: 'document-outline',
+        icon: 'document-text-outline',
         title: 'İçerik Yok',
         message: 'Henüz gösterilecek içerik bulunmuyor.',
     },
@@ -69,27 +72,16 @@ export function EmptyState({
     const displayMessage = message || config.message;
     const displayIcon = icon || config.icon;
 
-    const emojiMap: Record<string, string> = {
-        'chatbubbles-outline': '💬',
-        'chatbubble-ellipses-outline': '💭',
-        'chatbox-outline': '💬',
-        'heart-outline': '❤️',
-        'notifications-outline': '🔔',
-        'search-outline': '🔍',
-        'document-outline': '📄',
-    };
-
     return (
         <View style={styles.container}>
-            <View style={styles.iconContainer}>
-                <Text style={{ fontSize: 64, opacity: 0.5 }}>
-                    {emojiMap[displayIcon] || '📄'}
-                </Text>
+            <View style={styles.iconCircle}>
+                <Ionicons name={displayIcon} size={32} color={theme.colors.primary} />
             </View>
             <Text style={styles.title}>{displayTitle}</Text>
             <Text style={styles.message}>{displayMessage}</Text>
             {showAction && onAction && actionLabel && (
-                <TouchableOpacity style={styles.actionButton} onPress={onAction} activeOpacity={0.8}>
+                <TouchableOpacity style={styles.actionButton} onPress={onAction} activeOpacity={0.85}>
+                    <Ionicons name="add" size={18} color="#FFFFFF" />
                     <Text style={styles.actionButtonText}>{actionLabel}</Text>
                 </TouchableOpacity>
             )}
@@ -103,37 +95,47 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
             flex: 1,
             justifyContent: 'center',
             alignItems: 'center',
-            padding: theme.spacing.xl,
-            minHeight: 300,
+            padding: 28,
+            minHeight: 260,
         },
-        iconContainer: {
-            marginBottom: theme.spacing.lg,
-            opacity: 0.5,
+        iconCircle: {
+            width: 68,
+            height: 68,
+            borderRadius: 34,
+            backgroundColor: theme.colors.backgroundSecondary,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            justifyContent: 'center',
+            alignItems: 'center',
+            marginBottom: 14,
         },
         title: {
-            fontSize: 18,
+            fontSize: 17,
             fontWeight: '700',
             color: theme.colors.text,
-            marginBottom: theme.spacing.sm,
+            marginBottom: 6,
             textAlign: 'center',
         },
         message: {
-            fontSize: 14,
+            fontSize: 13.5,
             color: theme.colors.textSecondary,
             textAlign: 'center',
             lineHeight: 20,
-            marginBottom: theme.spacing.xl,
-            paddingHorizontal: theme.spacing.md,
+            marginBottom: 18,
+            paddingHorizontal: 12,
         },
         actionButton: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
             backgroundColor: theme.colors.primary,
-            paddingHorizontal: theme.spacing.xl,
-            paddingVertical: theme.spacing.md,
-            borderRadius: 12,
+            paddingHorizontal: 18,
+            paddingVertical: 11,
+            borderRadius: 16,
         },
         actionButtonText: {
-            fontSize: 16,
-            fontWeight: '600',
+            fontSize: 14,
+            fontWeight: '700',
             color: '#fff',
         },
     });

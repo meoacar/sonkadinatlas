@@ -3,7 +3,8 @@ import { ConfigModule } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { BullModule } from '@nestjs/bullmq';
 import { ScheduleModule } from '@nestjs/schedule';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { AuditLogInterceptor } from './audit-log/audit-log.interceptor';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -31,6 +32,7 @@ import { GamificationModule } from './gamification/gamification.module';
 import { AstrologyModule } from './astrology/astrology.module';
 import { AIProviderModule } from './ai-provider/ai-provider.module';
 import { AdminModule } from './admin/admin.module';
+import { PartnerModule } from './partner/partner.module';
 import aiConfig from './config/ai.config';
 
 @Module({
@@ -83,6 +85,7 @@ import aiConfig from './config/ai.config';
     AstrologyModule,
     AIProviderModule,
     AdminModule,
+    PartnerModule,
   ],
   controllers: [AppController],
   providers: [
@@ -90,6 +93,10 @@ import aiConfig from './config/ai.config';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: AuditLogInterceptor,
     },
   ],
 })

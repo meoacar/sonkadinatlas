@@ -17,14 +17,23 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { Throttle } from '@nestjs/throttler';
 import { QnaService } from './qna.service';
-import { CreateQuestionDto, UpdateQuestionDto, QuestionFiltersDto } from './dto';
-import { OwnerGuard } from './guards';
+import { CreateQuestionDto, AdminCreateQuestionDto, UpdateQuestionDto, AdminUpdateQuestionDto, QuestionFiltersDto } from './dto';
+import { OwnerGuard, AdminGuard } from './guards';
 import { SanitizePipe } from './pipes';
 
 @Controller('qna/questions')
 @UseGuards(AuthGuard('jwt'))
 export class QuestionsController {
     constructor(private readonly qnaService: QnaService) { }
+
+    @Post('admin')
+    @HttpCode(HttpStatus.CREATED)
+    @UseGuards(AdminGuard)
+    @UsePipes(new SanitizePipe())
+    async adminCreateQuestion(@Request() req, @Body() dto: AdminCreateQuestionDto) {
+        const userId = req.user.id || req.user.sub;
+        return this.qnaService.adminCreateQuestion(userId, dto);
+    }
 
     @Post()
     @HttpCode(HttpStatus.CREATED)
@@ -71,6 +80,29 @@ export class QuestionsController {
             throw new BadRequestException('Geçersiz soru ID');
         }
         return this.qnaService.getQuestionById(id, req.user.id);
+    }
+
+    @Patch(':id/admin')
+    @UseGuards(AdminGuard)
+    @UsePipes(new SanitizePipe())
+    async adminUpdateQuestion(
+        @Param('id') id: string,
+        @Body() dto: AdminUpdateQuestionDto,
+    ) {
+        if (!id || id.length < 10) {
+            throw new BadRequestException('Geçersiz soru ID');
+        }
+        return this.qnaService.adminUpdateQuestion(id, dto);
+    }
+
+    @Delete(':id/admin')
+    @HttpCode(HttpStatus.NO_CONTENT)
+    @UseGuards(AdminGuard)
+    async adminDeleteQuestion(@Param('id') id: string) {
+        if (!id || id.length < 10) {
+            throw new BadRequestException('Geçersiz soru ID');
+        }
+        await this.qnaService.adminDeleteQuestion(id);
     }
 
     @Patch(':id')

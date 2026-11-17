@@ -61,7 +61,7 @@ export const StepsTile: React.FC<StepsTileProps> = ({ data }) => {
         value="-"
         isEmpty
         emptyState="Bugün veri yok – Manuel Ekle"
-        onPress={() => router.push('/steps')}
+        onPress={() => router.push('/wellness/steps')}
         actions={
           <TouchableOpacity
             style={styles(theme).actionButton}
@@ -88,7 +88,7 @@ export const StepsTile: React.FC<StepsTileProps> = ({ data }) => {
         value={`${formatNumber(data.today)} adım`}
         target={`Hedef ${formatNumber(data.goal)}`}
         percentage={data.percentage}
-        onPress={() => router.push('/steps')}
+        onPress={() => router.push('/wellness/steps')}
         actions={
           <View style={styles(theme).actionsRow}>
             <TouchableOpacity

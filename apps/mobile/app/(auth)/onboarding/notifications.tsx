@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Alert,
+  Linking,
+  Platform,
+  Switch,
+  ActivityIndicator,
+} from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as Notifications from 'expo-notifications';
@@ -16,22 +27,41 @@ const INTENSITY_OPTIONS = [
   {
     value: 'light' as const,
     label: 'Hafif',
-    emoji: '🔕',
-    description: 'Sadece kritik adet hatırlatmaları ve haftalık özet',
+    icon: 'notifications-off-outline' as const,
+    color: '#64748B',
+    badge: null,
+    description: 'Yalnızca kritik regl başlangıç uyarıları ve haftalık özet.',
   },
   {
     value: 'medium' as const,
     label: 'Orta',
-    emoji: '🔔',
-    description: 'Günlük hatırlatmalar ve öneriler',
+    icon: 'notifications-outline' as const,
+    color: '#EC4899',
+    badge: 'ÖNERİLEN',
+    description: 'Döngü fazı ipuçları, günlük su/uyku hatırlatmaları.',
   },
   {
     value: 'high' as const,
     label: 'Yoğun',
-    emoji: '🔔🔔',
-    description: 'Sık hatırlatmalar, ipuçları ve kişiselleştirilmiş öneriler',
+    icon: 'flash-outline' as const,
+    color: '#8B5CF6',
+    badge: null,
+    description: 'Sık wellness teşvikleri, ilaç ve nefes hatırlatıcıları.',
   },
 ];
+
+const QUIET_PRESETS = [
+  { label: '22:00 – 08:00', start: '22:00', end: '08:00' },
+  { label: '23:00 – 07:00', start: '23:00', end: '07:00' },
+  { label: '00:00 – 08:00', start: '00:00', end: '08:00' },
+];
+
+function stepHour(timeStr: string, delta: number): string {
+  const hour = Number(timeStr.split(':')[0]);
+  const safeHour = Number.isFinite(hour) ? hour : 22;
+  const nextHour = (safeHour + delta + 24) % 24;
+  return `${String(nextHour).padStart(2, '0')}:00`;
+}
 
 export default function NotificationsStep() {
   const router = useRouter();
@@ -40,28 +70,38 @@ export default function NotificationsStep() {
 
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [requestingPermission, setRequestingPermission] = useState(false);
-  const [showQuietHours, setShowQuietHours] = useState(false);
+  const [quietEnabled, setQuietEnabled] = useState(
+    Boolean(data.quietHoursStart || data.quietHoursEnd)
+  );
 
   const {
     control,
     handleSubmit,
     watch,
+    setValue,
   } = useForm<NotificationInput>({
-    resolver: zodResolver(NotificationSchema),
+    resolver: zodResolver(NotificationSchema) as any,
     defaultValues: {
-      intensity: data.notificationIntensity || 'light',
-      quietHoursStart: data.quietHoursStart,
-      quietHoursEnd: data.quietHoursEnd,
+      intensity: (data.notificationIntensity || 'medium') as
+        | 'light'
+        | 'medium'
+        | 'high',
+      quietHoursStart: data.quietHoursStart || '22:00',
+      quietHoursEnd: data.quietHoursEnd || '08:00',
     },
   });
 
-  const intensity = watch('intensity');
+  const quietStart = watch('quietHoursStart') || '22:00';
+  const quietEnd = watch('quietHoursEnd') || '08:00';
 
   useEffect(() => {
     setCurrentStep(4);
     Notifications.getPermissionsAsync()
       .then((res) => {
-        if (res.granted || res.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
+        if (
+          res.granted ||
+          res.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
+        ) {
           setPermissionGranted(true);
         }
       })
@@ -94,11 +134,14 @@ export default function NotificationsStep() {
 
       if (isGranted) {
         setPermissionGranted(true);
-        Alert.alert('Bildirim İzni Verildi 🔔', 'Bildirim tercihlerin başarıyla kaydedildi.');
+        Alert.alert(
+          'Bildirim İzni Verildi',
+          'Bildirim tercihlerin başarıyla kaydedildi.'
+        );
       } else if (!canAskAgain) {
         Alert.alert(
           'Bildirim İzni Gerekli',
-          'Bildirim izni daha önce reddedilmiş. Cihaz ayarlarından bildirimlere izin verebilir veya doğrudan devam edebilirsin.',
+          'Bildirim izni daha önce reddedilmiş. Cihaz ayarlarından izin verebilir veya doğrudan devam edebilirsin.',
           [
             { text: 'Şimdilik Geç', style: 'cancel' },
             {
@@ -124,19 +167,27 @@ export default function NotificationsStep() {
       console.warn('Notification permission request fallback:', error);
       setPermissionGranted(true);
       Alert.alert(
-        'Bildirim Tercihi Kaydedildi 🔔',
-        'Simülatör/Expo Go ortamında bildirim tercihin uygulama içi olarak aktif edildi.'
+        'Bildirim Tercihi Kaydedildi',
+        'Expo Go / geliştirme ortamında bildirim tercihin uygulama içi olarak aktif edildi.'
       );
     } finally {
       setRequestingPermission(false);
     }
   };
 
+  const toggleQuietHours = (enabled: boolean) => {
+    setQuietEnabled(enabled);
+    if (enabled) {
+      setValue('quietHoursStart', quietStart || '22:00');
+      setValue('quietHoursEnd', quietEnd || '08:00');
+    }
+  };
+
   const onSubmit = async (formData: NotificationInput) => {
     await updateData({
       notificationIntensity: formData.intensity,
-      quietHoursStart: formData.quietHoursStart,
-      quietHoursEnd: formData.quietHoursEnd,
+      quietHoursStart: quietEnabled ? formData.quietHoursStart || '22:00' : undefined,
+      quietHoursEnd: quietEnabled ? formData.quietHoursEnd || '08:00' : undefined,
     });
 
     completeStep(4);
@@ -153,138 +204,275 @@ export default function NotificationsStep() {
     <StepContainer
       currentStep={4}
       totalSteps={TOTAL_STEPS}
-      title="Bildirimler 🔔"
-      subtitle="Bildirim tercihlerinizi seçin"
+      headerIcon="notifications-outline"
+      title="Bildirim Tercihleri"
+      subtitle="Hangi sıklıkta hatırlatma almak istediğini ve sessiz saatlerini belirle."
+      onBack={handleBack}
     >
       <View style={styles.content}>
         {/* Intensity Selection */}
-        <View style={styles.section}>
+        <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Bildirim Yoğunluğu</Text>
           <Controller
             control={control}
             name="intensity"
             render={({ field: { onChange, value } }) => (
-              <View style={styles.optionsContainer}>
-                {INTENSITY_OPTIONS.map((option) => (
-                  <TouchableOpacity
-                    key={option.value}
-                    style={[
-                      styles.option,
-                      value === option.value && styles.optionSelected,
-                    ]}
-                    onPress={() => onChange(option.value)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.optionHeader}>
-                      <Text style={styles.optionEmoji}>{option.emoji}</Text>
-                      <Text
+              <View style={styles.optionsList}>
+                {INTENSITY_OPTIONS.map((option) => {
+                  const selected = value === option.value;
+                  return (
+                    <TouchableOpacity
+                      key={option.value}
+                      activeOpacity={0.82}
+                      onPress={() => onChange(option.value)}
+                      style={[
+                        styles.intensityCard,
+                        selected && styles.intensityCardSelected,
+                      ]}
+                    >
+                      <View
                         style={[
-                          styles.optionLabel,
-                          value === option.value && styles.optionLabelSelected,
+                          styles.intensityIconBox,
+                          { backgroundColor: `${option.color}18` },
                         ]}
                       >
-                        {option.label}
-                      </Text>
-                    </View>
-                    <Text style={styles.optionDescription}>{option.description}</Text>
-                  </TouchableOpacity>
-                ))}
+                        <Ionicons
+                          name={option.icon}
+                          size={20}
+                          color={selected ? theme.colors.primary : option.color}
+                        />
+                      </View>
+
+                      <View style={styles.intensityBody}>
+                        <View style={styles.intensityTitleRow}>
+                          <Text
+                            style={[
+                              styles.intensityLabel,
+                              selected && styles.intensityLabelSelected,
+                            ]}
+                          >
+                            {option.label}
+                          </Text>
+                          {option.badge ? (
+                            <View style={styles.recommendedPill}>
+                              <Text style={styles.recommendedPillText}>
+                                {option.badge}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        <Text style={styles.intensityDesc}>
+                          {option.description}
+                        </Text>
+                      </View>
+
+                      <View
+                        style={[
+                          styles.radioOuter,
+                          selected && styles.radioOuterSelected,
+                        ]}
+                      >
+                        {selected ? <View style={styles.radioInner} /> : null}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             )}
           />
         </View>
 
         {/* Quiet Hours */}
-        <View style={styles.section}>
-          <TouchableOpacity
-            style={styles.quietHoursToggle}
-            onPress={() => setShowQuietHours(!showQuietHours)}
-          >
-            <Text style={styles.sectionTitle}>Sessiz Saatler (İsteğe bağlı)</Text>
-            <Text style={styles.toggleIcon}>{showQuietHours ? '−' : '+'}</Text>
-          </TouchableOpacity>
-
-          {showQuietHours && (
-            <View style={styles.quietHoursContent}>
-              <Text style={styles.helperText}>
-                Belirttiğiniz saatler arasında bildirim almayacaksınız
+        <View style={styles.sectionCard}>
+          <View style={styles.quietHeaderRow}>
+            <View style={styles.quietTitleCol}>
+              <Text style={styles.sectionTitleNoMargin}>Sessiz Saatler</Text>
+              <Text style={styles.quietSub}>
+                Gece uyurken rahatsız edilme
               </Text>
-              <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
+            </View>
+            <Switch
+              value={quietEnabled}
+              onValueChange={toggleQuietHours}
+              trackColor={{
+                false: theme.isDark ? '#3F3F46' : '#E5E7EB',
+                true: theme.colors.primary,
+              }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+
+          {quietEnabled && (
+            <View style={styles.quietBody}>
+              {/* Presets */}
+              <View style={styles.presetRow}>
+                {QUIET_PRESETS.map((preset) => {
+                  const active =
+                    quietStart === preset.start && quietEnd === preset.end;
+                  return (
+                    <TouchableOpacity
+                      key={preset.label}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        setValue('quietHoursStart', preset.start);
+                        setValue('quietHoursEnd', preset.end);
+                      }}
+                      style={[
+                        styles.presetChip,
+                        active && styles.presetChipActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.presetChipText,
+                          active && styles.presetChipTextActive,
+                        ]}
+                      >
+                        {preset.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Steppers */}
+              <View style={styles.steppersRow}>
                 <Controller
                   control={control}
                   name="quietHoursStart"
-                  render={({ field: { onChange, value } }) => (
-                    <TouchableOpacity
-                      style={[styles.option, { flex: 1, padding: 12, alignItems: 'center' }]}
-                      onPress={() => {
-                        const next = value === '22:00' ? '23:00' : value === '23:00' ? '00:00' : '22:00';
-                        onChange(next);
-                      }}
-                    >
-                      <Text style={styles.helperText}>Başlangıç</Text>
-                      <Text style={[styles.optionLabel, { color: theme.colors.primary }]}>
-                        🌙 {value || '22:00'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
+                  render={({ field: { onChange, value } }) => {
+                    const current = value || '22:00';
+                    return (
+                      <View style={styles.timeStepperCard}>
+                        <View style={styles.timeHeader}>
+                          <Ionicons
+                            name="moon-outline"
+                            size={14}
+                            color="#8B5CF6"
+                          />
+                          <Text style={styles.timeLabel}>Başlangıç</Text>
+                        </View>
+                        <View style={styles.stepperControls}>
+                          <TouchableOpacity
+                            style={styles.stepperBtn}
+                            onPress={() => onChange(stepHour(current, -1))}
+                          >
+                            <Ionicons
+                              name="remove"
+                              size={16}
+                              color={theme.colors.text}
+                            />
+                          </TouchableOpacity>
+                          <Text style={styles.timeValue}>{current}</Text>
+                          <TouchableOpacity
+                            style={styles.stepperBtn}
+                            onPress={() => onChange(stepHour(current, 1))}
+                          >
+                            <Ionicons
+                              name="add"
+                              size={16}
+                              color={theme.colors.text}
+                            />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  }}
                 />
+
                 <Controller
                   control={control}
                   name="quietHoursEnd"
-                  render={({ field: { onChange, value } }) => (
-                    <TouchableOpacity
-                      style={[styles.option, { flex: 1, padding: 12, alignItems: 'center' }]}
-                      onPress={() => {
-                        const next = value === '08:00' ? '09:00' : value === '09:00' ? '07:00' : '08:00';
-                        onChange(next);
-                      }}
-                    >
-                      <Text style={styles.helperText}>Bitiş</Text>
-                      <Text style={[styles.optionLabel, { color: theme.colors.primary }]}>
-                        ☀️ {value || '08:00'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
+                  render={({ field: { onChange, value } }) => {
+                    const current = value || '08:00';
+                    return (
+                      <View style={styles.timeStepperCard}>
+                        <View style={styles.timeHeader}>
+                          <Ionicons
+                            name="sunny-outline"
+                            size={14}
+                            color="#F59E0B"
+                          />
+                          <Text style={styles.timeLabel}>Bitiş</Text>
+                        </View>
+                        <View style={styles.stepperControls}>
+                          <TouchableOpacity
+                            style={styles.stepperBtn}
+                            onPress={() => onChange(stepHour(current, -1))}
+                          >
+                            <Ionicons
+                              name="remove"
+                              size={16}
+                              color={theme.colors.text}
+                            />
+                          </TouchableOpacity>
+                          <Text style={styles.timeValue}>{current}</Text>
+                          <TouchableOpacity
+                            style={styles.stepperBtn}
+                            onPress={() => onChange(stepHour(current, 1))}
+                          >
+                            <Ionicons
+                              name="add"
+                              size={16}
+                              color={theme.colors.text}
+                            />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  }}
                 />
-              </View>
-              <View style={styles.infoCard}>
-                <Text style={styles.infoEmoji}>💡</Text>
-                <Text style={styles.infoText}>
-                  Saatlerin üzerine dokunarak değiştirebilir veya kayıt sonrası ayarlardan özelleştirebilirsiniz
-                </Text>
               </View>
             </View>
           )}
         </View>
 
-        {/* Permission Request */}
-        {!permissionGranted && (
-          <View style={styles.permissionCard}>
-            <Text style={styles.permissionTitle}>📱 Bildirim İzni</Text>
-            <Text style={styles.permissionText}>
-              Hatırlatmalarınızı alabilmek için bildirim iznine ihtiyacımız var
+        {/* Permission Status Card */}
+        {permissionGranted ? (
+          <View style={styles.permissionSuccessCard}>
+            <Ionicons
+              name="checkmark-circle"
+              size={22}
+              color={theme.colors.success}
+            />
+            <Text style={styles.permissionSuccessText}>
+              Bildirim izni aktif. Hatırlatmaların zamanında iletilecek.
             </Text>
-            <TouchableOpacity
-              style={styles.permissionButton}
-              onPress={requestNotificationPermission}
-            >
-              <Text style={styles.permissionButtonText}>İzin Ver</Text>
-            </TouchableOpacity>
           </View>
-        )}
-
-        {permissionGranted && (
-          <View style={styles.successCard}>
-            <Text style={styles.successIcon}>✓</Text>
-            <Text style={styles.successText}>Bildirim izni verildi</Text>
+        ) : (
+          <View style={styles.permissionPromptCard}>
+            <View style={styles.permissionTop}>
+              <Ionicons
+                name="notifications-circle-outline"
+                size={24}
+                color={theme.colors.primary}
+              />
+              <View style={styles.permissionCopy}>
+                <Text style={styles.permissionTitle}>Cihaz Bildirim İzni</Text>
+                <Text style={styles.permissionDesc}>
+                  Adet tahminlerini ve su hatırlatmalarını alabilmek için izin ver.
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              style={styles.permissionBtn}
+              onPress={requestNotificationPermission}
+              disabled={requestingPermission}
+            >
+              {requestingPermission ? (
+                <ActivityIndicator size="small" color={theme.colors.primary} />
+              ) : (
+                <Text style={styles.permissionBtnText}>Bildirimlere İzin Ver</Text>
+              )}
+            </TouchableOpacity>
           </View>
         )}
       </View>
 
       <StepButtons
         onNext={handleSubmit(onSubmit)}
-        onBack={handleBack}
-        nextLabel="İleri"
+        nextLabel="Kaydet ve Devam Et"
       />
     </StepContainer>
   );
@@ -294,130 +482,247 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
     content: {
       flex: 1,
+      gap: 12,
     },
-    section: {
-      marginBottom: theme.spacing.xl,
+    sectionCard: {
+      backgroundColor: theme.colors.backgroundCard,
+      borderRadius: 22,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
     },
     sectionTitle: {
-      ...theme.typography.subtitle,
+      fontSize: 15,
+      fontWeight: '700',
       color: theme.colors.text,
-      marginBottom: theme.spacing.md,
+      marginBottom: 12,
     },
-    optionsContainer: {
-      gap: theme.spacing.md,
+    sectionTitleNoMargin: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: theme.colors.text,
     },
-    option: {
-      backgroundColor: theme.colors.backgroundCard,
+    optionsList: {
+      gap: 10,
+    },
+    intensityCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      backgroundColor: theme.isDark ? '#121215' : '#F9FAFB',
+      borderWidth: 1.5,
+      borderColor: theme.colors.border,
+      borderRadius: 16,
+      padding: 13,
+    },
+    intensityCardSelected: {
+      borderColor: theme.colors.primary,
+      backgroundColor: theme.isDark
+        ? 'rgba(255, 105, 180, 0.08)'
+        : '#FFF5F9',
+    },
+    intensityIconBox: {
+      width: 40,
+      height: 40,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    intensityBody: {
+      flex: 1,
+    },
+    intensityTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 7,
+      marginBottom: 2,
+    },
+    intensityLabel: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    intensityLabelSelected: {
+      color: theme.colors.primary,
+    },
+    recommendedPill: {
+      backgroundColor: 'rgba(236, 72, 153, 0.14)',
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 6,
+    },
+    recommendedPillText: {
+      fontSize: 10,
+      fontWeight: '800',
+      color: theme.colors.primary,
+    },
+    intensityDesc: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      lineHeight: 17,
+    },
+    radioOuter: {
+      width: 20,
+      height: 20,
+      borderRadius: 10,
       borderWidth: 2,
       borderColor: theme.colors.border,
-      borderRadius: theme.card.borderRadius,
-      padding: theme.spacing.lg,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
-    optionSelected: {
+    radioOuterSelected: {
       borderColor: theme.colors.primary,
-      backgroundColor: theme.colors.backgroundSecondary,
     },
-    optionHeader: {
+    radioInner: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      backgroundColor: theme.colors.primary,
+    },
+    quietHeaderRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: theme.spacing.sm,
-    },
-    optionEmoji: {
-      fontSize: 24,
-      marginRight: theme.spacing.sm,
-    },
-    optionLabel: {
-      ...theme.typography.subtitle,
-      color: theme.colors.text,
-      fontSize: 18,
-    },
-    optionLabelSelected: {
-      color: theme.colors.primary,
-    },
-    optionDescription: {
-      ...theme.typography.body,
-      color: theme.colors.textSecondary,
-      lineHeight: 20,
-    },
-    quietHoursToggle: {
-      flexDirection: 'row',
       justifyContent: 'space-between',
-      alignItems: 'center',
     },
-    toggleIcon: {
-      fontSize: 24,
+    quietTitleCol: {
+      gap: 2,
+    },
+    quietSub: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+    },
+    quietBody: {
+      marginTop: 14,
+      paddingTop: 14,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+      gap: 12,
+    },
+    presetRow: {
+      flexDirection: 'row',
+      gap: 6,
+    },
+    presetChip: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: 7,
+      borderRadius: 10,
+      backgroundColor: theme.isDark ? '#121215' : '#F3F4F6',
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    presetChipActive: {
+      backgroundColor: theme.isDark
+        ? 'rgba(255, 105, 180, 0.16)'
+        : '#FCE7F3',
+      borderColor: theme.colors.primary,
+    },
+    presetChipText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    presetChipTextActive: {
       color: theme.colors.primary,
       fontWeight: '700',
     },
-    quietHoursContent: {
-      marginTop: theme.spacing.md,
-    },
-    helperText: {
-      ...theme.typography.caption,
-      color: theme.colors.textSecondary,
-      marginBottom: theme.spacing.md,
-    },
-    infoCard: {
-      backgroundColor: theme.colors.backgroundSecondary,
-      borderRadius: theme.card.borderRadius,
-      padding: theme.spacing.md,
+    steppersRow: {
       flexDirection: 'row',
-      alignItems: 'flex-start',
+      gap: 10,
     },
-    infoEmoji: {
-      fontSize: 18,
-      marginRight: theme.spacing.sm,
-    },
-    infoText: {
-      ...theme.typography.caption,
-      color: theme.colors.textSecondary,
+    timeStepperCard: {
       flex: 1,
+      backgroundColor: theme.isDark ? '#121215' : '#F9FAFB',
+      borderRadius: 14,
+      padding: 10,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      gap: 8,
+    },
+    timeHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 5,
+    },
+    timeLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    stepperControls: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    stepperBtn: {
+      width: 30,
+      height: 30,
+      borderRadius: 9,
+      backgroundColor: theme.colors.backgroundCard,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    timeValue: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: theme.colors.text,
+    },
+    permissionSuccessCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+      borderRadius: 16,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: 'rgba(16, 185, 129, 0.25)',
+    },
+    permissionSuccessText: {
+      flex: 1,
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.success,
       lineHeight: 18,
     },
-    permissionCard: {
-      backgroundColor: theme.colors.backgroundSecondary,
-      borderRadius: theme.card.borderRadius,
-      padding: theme.spacing.lg,
-      marginTop: theme.spacing.md,
+    permissionPromptCard: {
+      backgroundColor: theme.colors.backgroundCard,
+      borderRadius: 20,
+      padding: 15,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      gap: 12,
+    },
+    permissionTop: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    permissionCopy: {
+      flex: 1,
+      gap: 2,
     },
     permissionTitle: {
-      ...theme.typography.subtitle,
-      color: theme.colors.text,
-      marginBottom: theme.spacing.sm,
-    },
-    permissionText: {
-      ...theme.typography.body,
-      color: theme.colors.textSecondary,
-      marginBottom: theme.spacing.md,
-      lineHeight: 22,
-    },
-    permissionButton: {
-      backgroundColor: theme.colors.primary,
-      borderRadius: theme.button.borderRadius,
-      padding: theme.spacing.md,
-      alignItems: 'center',
-    },
-    permissionButtonText: {
-      color: theme.colors.textOnPrimary,
-      fontSize: 16,
+      fontSize: 14,
       fontWeight: '700',
+      color: theme.colors.text,
     },
-    successCard: {
-      flexDirection: 'row',
+    permissionDesc: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      lineHeight: 17,
+    },
+    permissionBtn: {
+      backgroundColor: theme.isDark ? '#27272A' : '#FCE7F3',
+      borderRadius: 12,
+      paddingVertical: 11,
       alignItems: 'center',
-      backgroundColor: theme.colors.backgroundSecondary,
-      borderRadius: theme.card.borderRadius,
-      padding: theme.spacing.md,
-      marginTop: theme.spacing.md,
     },
-    successIcon: {
-      fontSize: 20,
-      marginRight: theme.spacing.sm,
-      color: theme.colors.success,
-    },
-    successText: {
-      ...theme.typography.body,
-      color: theme.colors.success,
-      fontWeight: '600',
+    permissionBtnText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: theme.colors.primary,
     },
   });

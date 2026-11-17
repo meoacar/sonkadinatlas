@@ -5,15 +5,31 @@ import { PrismaService } from '../prisma/prisma.service';
 export class ModelPolicyService {
   constructor(private prisma: PrismaService) { }
 
+  private parseToolsJson(raw: any): string[] {
+    if (Array.isArray(raw)) return raw.map(String);
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.map(String) : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
+
   async findAll(params?: { page?: number; limit?: number; sortBy?: string; sortOrder?: string }) {
     const { page = 1, limit = 20, sortBy = 'updatedAt', sortOrder = 'desc' } = params || {};
     const skip = (page - 1) * limit;
+    const allowedSort = ['createdAt', 'updatedAt', 'plan', 'provider', 'modelName', 'temperature', 'maxTokens'];
+    const safeSortBy = allowedSort.includes(sortBy) ? sortBy : 'updatedAt';
+    const safeSortOrder: 'asc' | 'desc' = sortOrder === 'asc' || sortOrder === 'ascend' ? 'asc' : 'desc';
 
     const [data, total] = await Promise.all([
       this.prisma.modelPolicy.findMany({
         skip,
         take: limit,
-        orderBy: { [sortBy]: sortOrder },
+        orderBy: { [safeSortBy]: safeSortOrder },
       }),
       this.prisma.modelPolicy.count(),
     ]);
@@ -51,12 +67,12 @@ export class ModelPolicyService {
     modelName: string;
     temperature: number;
     maxTokens: number;
-    toolsEnabledJson?: string[];
+    toolsEnabledJson?: string[] | string;
   }) {
     return this.prisma.modelPolicy.create({
       data: {
         ...data,
-        toolsEnabledJson: data.toolsEnabledJson || [],
+        toolsEnabledJson: this.parseToolsJson(data.toolsEnabledJson),
       },
     });
   }
@@ -69,7 +85,7 @@ export class ModelPolicyService {
       modelName?: string;
       temperature?: number;
       maxTokens?: number;
-      toolsEnabledJson?: string[];
+      toolsEnabledJson?: string[] | string;
     },
   ) {
     const policy = await this.findOne(id);
@@ -78,6 +94,9 @@ export class ModelPolicyService {
       where: { id: policy.id },
       data: {
         ...data,
+        ...(data.toolsEnabledJson !== undefined
+          ? { toolsEnabledJson: this.parseToolsJson(data.toolsEnabledJson) }
+          : {}),
         updatedAt: new Date(),
       },
     });

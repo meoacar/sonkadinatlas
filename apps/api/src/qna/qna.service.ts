@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, Logger, BadRequestException, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateQuestionDto, UpdateQuestionDto, CreateAnswerDto, UpdateAnswerDto, CreateCommentDto, QuestionFiltersDto, SortType } from './dto';
+import { CreateQuestionDto, AdminCreateQuestionDto, UpdateQuestionDto, AdminUpdateQuestionDto, CreateAnswerDto, UpdateAnswerDto, CreateCommentDto, QuestionFiltersDto, SortType } from './dto';
 import { Question, Answer, QuestionComment, AnswerComment, QuestionStatus, SubscriptionStatus } from '@prisma/client';
 import { ReputationService } from './reputation.service';
 import { ModerationService } from './moderation.service';
@@ -123,7 +123,7 @@ export class QnaService {
 
     async getQuestions(filters: QuestionFiltersDto, userId?: string): Promise<any> {
         try {
-            const { category, tags, status, sort, search, page = 1, limit = 20 } = filters;
+            const { category, tags, status, sort, search, page = 1, limit = 20, sortBy, sortOrder } = filters;
             const skip = (page - 1) * limit;
 
             // Build where clause
@@ -153,7 +153,10 @@ export class QnaService {
             // Build orderBy clause
             let orderBy: any = { createdAt: 'desc' };
 
-            if (sort === SortType.POPULAR) {
+            const allowedSortFields = ['createdAt', 'viewCount', 'status', 'title', 'category'];
+            if (sortBy && allowedSortFields.includes(sortBy)) {
+                orderBy = { [sortBy]: sortOrder === 'asc' ? 'asc' : 'desc' };
+            } else if (sort === SortType.POPULAR) {
                 orderBy = [
                     { isPremium: 'desc' },
                     { viewCount: 'desc' },
@@ -188,6 +191,11 @@ export class QnaService {
                                     firstName: true,
                                     lastName: true,
                                     profilePictureUrl: true,
+                                },
+                            },
+                            reputation: {
+                                select: {
+                                    totalPoints: true,
                                 },
                             },
                         },
@@ -238,6 +246,7 @@ export class QnaService {
                         username: q.user.username,
                         displayName,
                         profilePictureUrl: q.user.profile?.profilePictureUrl,
+                        reputation: q.user.reputation?.totalPoints ?? 0,
                     } : undefined,
                     isFavorited: favoriteMap.get(q.id) || false,
                     isFollowing: followMap.get(q.id) || false,
@@ -266,11 +275,40 @@ export class QnaService {
                         select: {
                             id: true,
                             username: true,
+                            email: true,
                             profile: {
                                 select: {
                                     firstName: true,
                                     lastName: true,
                                     profilePictureUrl: true,
+                                },
+                            },
+                            reputation: {
+                                select: {
+                                    totalPoints: true,
+                                },
+                            },
+                        },
+                    },
+                    answers: {
+                        orderBy: [
+                            { isBestAnswer: 'desc' },
+                            { voteCount: 'desc' },
+                            { createdAt: 'desc' },
+                        ],
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true,
+                                    email: true,
+                                    profile: {
+                                        select: {
+                                            firstName: true,
+                                            lastName: true,
+                                            profilePictureUrl: true,
+                                        },
+                                    },
                                 },
                             },
                         },
@@ -306,9 +344,23 @@ export class QnaService {
                 user: question.user ? {
                     id: question.user.id,
                     username: question.user.username,
+                    email: question.user.email,
                     displayName,
                     profilePictureUrl: question.user.profile?.profilePictureUrl,
+                    reputation: question.user.reputation?.totalPoints ?? 0,
                 } : undefined,
+                answers: (question.answers || []).map((a) => ({
+                    ...a,
+                    user: a.user ? {
+                        id: a.user.id,
+                        username: a.user.username,
+                        email: a.user.email,
+                        displayName: a.user.profile?.firstName && a.user.profile?.lastName
+                            ? `${a.user.profile.firstName} ${a.user.profile.lastName}`
+                            : a.user.username || 'Anonim Kullanıcı',
+                        profilePictureUrl: a.user.profile?.profilePictureUrl,
+                    } : undefined,
+                })),
             };
 
             // Get user interactions if userId provided
@@ -411,6 +463,139 @@ export class QnaService {
         }
     }
 
+    async adminCreateQuestion(adminUserId: string, dto: AdminCreateQuestionDto): Promise<Question> {
+        const question = await this.prisma.question.create({
+            data: {
+                userId: adminUserId,
+                title: dto.title,
+                content: dto.content,
+                category: dto.category,
+                tags: dto.tags || [],
+                isAnonymous: dto.isAnonymous || false,
+                status: dto.status || QuestionStatus.OPEN,
+                isPremium: dto.isPremium ?? true,
+            },
+        });
+        this.logger.log(`Question created by admin: ${question.id}`);
+        return question;
+    }
+
+    async adminUpdateQuestion(id: string, dto: AdminUpdateQuestionDto): Promise<Question> {
+        const question = await this.prisma.question.findUnique({ where: { id } });
+        if (!question) {
+            throw new NotFoundException('Soru bulunamadı');
+        }
+
+        const updated = await this.prisma.question.update({
+            where: { id },
+            data: {
+                ...(dto.title !== undefined && { title: dto.title }),
+                ...(dto.content !== undefined && { content: dto.content }),
+                ...(dto.category !== undefined && { category: dto.category }),
+                ...(dto.tags !== undefined && { tags: dto.tags }),
+                ...(dto.status !== undefined && { status: dto.status }),
+                ...(dto.isAnonymous !== undefined && { isAnonymous: dto.isAnonymous }),
+                ...(dto.isPremium !== undefined && { isPremium: dto.isPremium }),
+            },
+        });
+        this.logger.log(`Question updated by admin: ${id}`);
+        return updated;
+    }
+
+    async adminDeleteQuestion(id: string): Promise<void> {
+        const question = await this.prisma.question.findUnique({ where: { id } });
+        if (!question) {
+            throw new NotFoundException('Soru bulunamadı');
+        }
+
+        await this.prisma.question.delete({ where: { id } });
+        this.logger.log(`Question deleted by admin: ${id}`);
+    }
+
+    async adminCreateAnswer(questionId: string, adminUserId: string, dto: CreateAnswerDto): Promise<any> {
+        const question = await this.prisma.question.findUnique({ where: { id: questionId } });
+        if (!question) {
+            throw new NotFoundException('Soru bulunamadı');
+        }
+
+        const answer = await this.prisma.answer.create({
+            data: {
+                questionId,
+                userId: adminUserId,
+                content: dto.content,
+            },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        profile: {
+                            select: {
+                                firstName: true,
+                                lastName: true,
+                                profilePictureUrl: true,
+                            },
+                        },
+                    },
+                },
+                _count: {
+                    select: {
+                        comments: true,
+                    },
+                },
+            },
+        });
+
+        if (question.status === QuestionStatus.OPEN) {
+            await this.prisma.question.update({
+                where: { id: questionId },
+                data: { status: QuestionStatus.ANSWERED },
+            });
+        }
+
+        this.notificationService.notifyNewAnswer(questionId, answer.id, adminUserId).catch(err => {
+            this.logger.error(`Failed to send notification for admin answer ${answer.id}:`, err);
+        });
+
+        return answer;
+    }
+
+    async adminMarkBestAnswer(questionId: string, answerId: string): Promise<void> {
+        const question = await this.prisma.question.findUnique({ where: { id: questionId } });
+        if (!question) {
+            throw new NotFoundException('Soru bulunamadı');
+        }
+
+        const answer = await this.prisma.answer.findUnique({ where: { id: answerId } });
+        if (!answer || answer.questionId !== questionId) {
+            throw new NotFoundException('Cevap bulunamadı');
+        }
+
+        await this.prisma.answer.updateMany({
+            where: { questionId, isBestAnswer: true },
+            data: { isBestAnswer: false },
+        });
+
+        await this.prisma.answer.update({
+            where: { id: answerId },
+            data: { isBestAnswer: true },
+        });
+
+        if (question.status === QuestionStatus.OPEN) {
+            await this.prisma.question.update({
+                where: { id: questionId },
+                data: { status: QuestionStatus.ANSWERED },
+            });
+        }
+
+        await this.reputationService.addReputationPoints(
+            answer.userId,
+            'BEST_ANSWER_SELECTED' as any,
+            { questionId, answerId },
+        );
+        this.logger.log(`Best answer marked by admin: ${answerId} on question ${questionId}`);
+    }
+
     // ==================== ANSWERS ====================
 
     async createAnswer(questionId: string, userId: string, dto: CreateAnswerDto): Promise<any> {
@@ -441,11 +626,17 @@ export class QnaService {
                         select: {
                             id: true,
                             username: true,
+                            email: true,
                             profile: {
                                 select: {
                                     firstName: true,
                                     lastName: true,
                                     profilePictureUrl: true,
+                                },
+                            },
+                            reputation: {
+                                select: {
+                                    totalPoints: true,
                                 },
                             },
                         },
@@ -633,11 +824,17 @@ export class QnaService {
                         select: {
                             id: true,
                             username: true,
+                            email: true,
                             profile: {
                                 select: {
                                     firstName: true,
                                     lastName: true,
                                     profilePictureUrl: true,
+                                },
+                            },
+                            reputation: {
+                                select: {
+                                    totalPoints: true,
                                 },
                             },
                         },
@@ -1199,11 +1396,40 @@ export class QnaService {
                         select: {
                             id: true,
                             username: true,
+                            email: true,
                             profile: {
                                 select: {
                                     firstName: true,
                                     lastName: true,
                                     profilePictureUrl: true,
+                                },
+                            },
+                            reputation: {
+                                select: {
+                                    totalPoints: true,
+                                },
+                            },
+                        },
+                    },
+                    answers: {
+                        orderBy: [
+                            { isBestAnswer: 'desc' },
+                            { voteCount: 'desc' },
+                            { createdAt: 'desc' },
+                        ],
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true,
+                                    email: true,
+                                    profile: {
+                                        select: {
+                                            firstName: true,
+                                            lastName: true,
+                                            profilePictureUrl: true,
+                                        },
+                                    },
                                 },
                             },
                         },
@@ -1338,11 +1564,40 @@ export class QnaService {
                         select: {
                             id: true,
                             username: true,
+                            email: true,
                             profile: {
                                 select: {
                                     firstName: true,
                                     lastName: true,
                                     profilePictureUrl: true,
+                                },
+                            },
+                            reputation: {
+                                select: {
+                                    totalPoints: true,
+                                },
+                            },
+                        },
+                    },
+                    answers: {
+                        orderBy: [
+                            { isBestAnswer: 'desc' },
+                            { voteCount: 'desc' },
+                            { createdAt: 'desc' },
+                        ],
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true,
+                                    email: true,
+                                    profile: {
+                                        select: {
+                                            firstName: true,
+                                            lastName: true,
+                                            profilePictureUrl: true,
+                                        },
+                                    },
                                 },
                             },
                         },
@@ -1469,11 +1724,40 @@ export class QnaService {
                         select: {
                             id: true,
                             username: true,
+                            email: true,
                             profile: {
                                 select: {
                                     firstName: true,
                                     lastName: true,
                                     profilePictureUrl: true,
+                                },
+                            },
+                            reputation: {
+                                select: {
+                                    totalPoints: true,
+                                },
+                            },
+                        },
+                    },
+                    answers: {
+                        orderBy: [
+                            { isBestAnswer: 'desc' },
+                            { voteCount: 'desc' },
+                            { createdAt: 'desc' },
+                        ],
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true,
+                                    email: true,
+                                    profile: {
+                                        select: {
+                                            firstName: true,
+                                            lastName: true,
+                                            profilePictureUrl: true,
+                                        },
+                                    },
                                 },
                             },
                         },

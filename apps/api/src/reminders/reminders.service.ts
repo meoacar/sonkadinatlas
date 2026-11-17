@@ -147,12 +147,32 @@ export class RemindersService {
     return updated;
   }
 
-  // Admin: Get all reminders with pagination
-  async getAllReminders(page: number = 1, limit: number = 20) {
+  // Admin: Get all reminders with pagination and optional filters
+  async getAllReminders(
+    page: number = 1,
+    limit: number = 20,
+    filters?: { search?: string; type?: string; active?: string },
+  ) {
     const skip = (page - 1) * limit;
+    const where: any = {};
+
+    if (filters?.type) {
+      where.type = filters.type;
+    }
+    if (filters?.active === 'true' || filters?.active === 'false') {
+      where.active = filters.active === 'true';
+    }
+    if (filters?.search?.trim()) {
+      const q = filters.search.trim();
+      where.OR = [
+        { user: { email: { contains: q, mode: 'insensitive' } } },
+        { user: { username: { contains: q, mode: 'insensitive' } } },
+      ];
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.reminder.findMany({
+        where,
         include: {
           user: {
             select: {
@@ -166,9 +186,62 @@ export class RemindersService {
         take: limit,
         orderBy: { nextRunAt: 'asc' },
       }),
-      this.prisma.reminder.count(),
+      this.prisma.reminder.count({ where }),
     ]);
 
     return { data, total, page, limit };
+  }
+
+  async adminUpdateReminder(id: string, data: UpdateReminderDto) {
+    const reminder = await this.prisma.reminder.findUnique({ where: { id } });
+    if (!reminder) {
+      throw new NotFoundException('Reminder not found');
+    }
+
+    const payloadJson = {
+      ...(reminder.payloadJson as any),
+      ...(data.title && { title: data.title }),
+      ...(data.message && { message: data.message }),
+      ...(data.time && { time: data.time }),
+      ...(data.days && { days: data.days }),
+      ...(data.customCron && { customCron: data.customCron }),
+    };
+
+    const nextRunAt =
+      data.time || data.days || data.customCron
+        ? this.scheduler.calculateNextRun(
+            reminder.type,
+            (payloadJson as any).time,
+            (payloadJson as any).days,
+            (payloadJson as any).customCron,
+          )
+        : reminder.nextRunAt;
+
+    const updated = await this.prisma.reminder.update({
+      where: { id },
+      data: {
+        payloadJson,
+        nextRunAt,
+        ...(data.active !== undefined && { active: data.active }),
+      },
+    });
+
+    await this.scheduler.cancelReminder(id);
+    if (updated.active) {
+      await this.scheduler.scheduleReminder(updated);
+    }
+
+    return updated;
+  }
+
+  async adminDeleteReminder(id: string) {
+    const reminder = await this.prisma.reminder.findUnique({ where: { id } });
+    if (!reminder) {
+      throw new NotFoundException('Reminder not found');
+    }
+
+    await this.scheduler.cancelReminder(id);
+    await this.prisma.reminder.delete({ where: { id } });
+    return { success: true };
   }
 }

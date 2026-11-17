@@ -21,6 +21,7 @@ export class AuditLogService {
     userId?: string;
     action?: string;
     entity?: string;
+    search?: string;
     sortBy?: string;
     sortOrder?: string;
   }) {
@@ -30,22 +31,45 @@ export class AuditLogService {
       userId,
       action,
       entity,
+      search,
       sortBy = 'createdAt',
       sortOrder = 'desc',
     } = params || {};
     const skip = (page - 1) * limit;
+    const allowedSortFields = ['createdAt', 'action', 'entity', 'entityId'];
+    const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
+    const safeSortOrder: 'asc' | 'desc' =
+      sortOrder === 'asc' || sortOrder === 'ascend' ? 'asc' : 'desc';
 
     const where: any = {};
     if (userId) where.userId = userId;
     if (action) where.action = action;
     if (entity) where.entity = entity;
+    if (search?.trim()) {
+      const q = search.trim();
+      where.OR = [
+        { action: { contains: q, mode: 'insensitive' } },
+        { entity: { contains: q, mode: 'insensitive' } },
+        { entityId: { contains: q, mode: 'insensitive' } },
+        { user: { email: { contains: q, mode: 'insensitive' } } },
+      ];
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.auditLog.findMany({
         where,
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              username: true,
+            },
+          },
+        },
         skip,
         take: limit,
-        orderBy: { [sortBy]: sortOrder },
+        orderBy: { [safeSortBy]: safeSortOrder },
       }),
       this.prisma.auditLog.count({ where }),
     ]);

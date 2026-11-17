@@ -13,6 +13,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { RemindersService, CreateReminderDto, UpdateReminderDto } from './reminders.service';
 import { PushService } from './push.service';
+import { AdminGuard } from '../common/guards/admin.guard';
 
 @Controller('reminders')
 @UseGuards(AuthGuard('jwt'))
@@ -24,14 +25,34 @@ export class RemindersController {
 
   // Admin: Get all reminders (must be before @Get(':id'))
   @Get('admin/all')
+  @UseGuards(AdminGuard)
   async getAllReminders(
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '20',
+    @Query('search') search?: string,
+    @Query('type') type?: string,
+    @Query('active') active?: string,
   ) {
     return this.remindersService.getAllReminders(
-      parseInt(page, 10),
-      parseInt(limit, 10),
+      parseInt(page, 10) || 1,
+      parseInt(limit, 10) || 20,
+      { search, type, active },
     );
+  }
+
+  @Patch('admin/:id')
+  @UseGuards(AdminGuard)
+  async adminUpdateReminder(
+    @Param('id') id: string,
+    @Body() data: UpdateReminderDto,
+  ) {
+    return this.remindersService.adminUpdateReminder(id, data);
+  }
+
+  @Delete('admin/:id')
+  @UseGuards(AdminGuard)
+  async adminDeleteReminder(@Param('id') id: string) {
+    return this.remindersService.adminDeleteReminder(id);
   }
 
   @Post()

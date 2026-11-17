@@ -33,12 +33,24 @@ export class PregnancyService {
       }),
     };
 
-    // Calculate trimester and week cache if we have LMP date
-    if (data.lmpDate || existing?.lmpDate) {
-      const lmpDate = data.lmpDate
-        ? new Date(data.lmpDate)
-        : existing!.lmpDate!;
-      const weeks = this.calculateWeeksFromLMP(lmpDate);
+    // Derive missing LMP or dueDate automatically so week/trimester always compute cleanly
+    const effectiveLmp = data.lmpDate
+      ? new Date(data.lmpDate)
+      : existing?.lmpDate ||
+        (data.dueDate
+          ? new Date(new Date(data.dueDate).getTime() - 280 * 24 * 60 * 60 * 1000)
+          : existing?.dueDate
+            ? new Date(new Date(existing.dueDate).getTime() - 280 * 24 * 60 * 60 * 1000)
+            : null);
+
+    if (effectiveLmp) {
+      if (!pregnancyData.lmpDate && !existing?.lmpDate) {
+        pregnancyData.lmpDate = effectiveLmp;
+      }
+      if (!pregnancyData.dueDate && !existing?.dueDate) {
+        pregnancyData.dueDate = new Date(effectiveLmp.getTime() + 280 * 24 * 60 * 60 * 1000);
+      }
+      const weeks = this.calculateWeeksFromLMP(effectiveLmp);
       pregnancyData.weekCache = weeks;
       pregnancyData.trimester = this.calculateTrimester(weeks);
     }

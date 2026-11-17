@@ -25,7 +25,7 @@ export class SSEClient {
   private xhr: XMLHttpRequest | null = null;
   private buffer = '';
   private lastFlush = Date.now();
-  private flushTimer: NodeJS.Timeout | null = null;
+  private flushTimer: ReturnType<typeof setInterval> | null = null;
 
   async stream(url: string, token: string, callbacks: SSECallbacks) {
     return new Promise<void>((resolve, reject) => {

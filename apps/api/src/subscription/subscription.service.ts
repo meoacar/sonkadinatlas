@@ -4,6 +4,11 @@ import { SubscriptionStatus, Subscription, PaymentProvider, SubscriptionTier, Tr
 import { ReceiptValidatorService } from './receipt-validator.service';
 import { SubscriptionNotificationService } from './subscription-notification.service';
 import { SubscriptionAnalyticsService } from './subscription-analytics.service';
+import {
+    DEFAULT_PAYWALL_CONFIG,
+    PAYWALL_CONFIG_FLAG_KEY,
+    type PremiumPaywallConfig,
+} from './paywall-config.defaults';
 import { PurchaseDto, RestoreDto } from './dto';
 
 @Injectable()
@@ -652,30 +657,64 @@ export class SubscriptionService {
      */
     async getUsageStats(userId: string) {
         const subscription = await this.getSubscription(userId);
+        const monthKey = new Date().toISOString().slice(0, 7);
 
-        // Get premium feature usage
-        const featureUsage = await this.prisma.premiumFeatureUsage.findMany({
-            where: { userId },
-            orderBy: { usageCount: 'desc' },
-        });
+        const [
+            featureUsage,
+            gamification,
+            userMessagesCount,
+            insightsCount,
+            completedBadges,
+            usageQuota,
+        ] = await Promise.all([
+            this.prisma.premiumFeatureUsage.findMany({
+                where: { userId },
+                orderBy: { usageCount: 'desc' },
+            }),
+            this.prisma.userGamification.findUnique({
+                where: { userId },
+            }),
+            this.prisma.message.count({
+                where: {
+                    conversation: { userId },
+                    role: 'user',
+                },
+            }),
+            this.prisma.userInsight.count({
+                where: { userId },
+            }),
+            this.prisma.userAchievement.count({
+                where: { userId, isCompleted: true },
+            }),
+            this.prisma.usageQuota.findUnique({
+                where: { userId_monthKey: { userId, monthKey } },
+            }),
+        ]);
+
+        const totalMessages = Math.max(
+            subscription.aiMessagesUsed || 0,
+            usageQuota?.aiRequests || 0,
+            userMessagesCount,
+        );
 
         // Calculate time saved (estimate: 2 minutes per AI message)
-        const timeSaved = subscription.aiMessagesUsed * 2;
+        const timeSaved = totalMessages * 2;
 
-        // Count insights generated (from premium feature usage)
-        const insightsFeature = featureUsage.find(f => f.feature === 'insights');
-        const insightsGenerated = insightsFeature?.usageCount || 0;
+        // Count insights generated
+        const insightsFeature = featureUsage.find((f) => f.feature === 'insights');
+        const insightsGenerated = Math.max(insightsFeature?.usageCount || 0, insightsCount);
 
-        // Get user's streak from home service (if available)
-        // For now, return 0 as streak calculation is in home service
-        const currentStreak = 0;
+        const currentStreak = gamification?.currentStreak || 0;
+        const longestStreak = gamification?.longestStreak || 0;
+        const totalDataEntries = gamification?.totalDataEntries || 0;
 
         // Member since date
-        const memberSince = subscription.startDate?.toISOString() || subscription.createdAt.toISOString();
+        const memberSince =
+            subscription.startDate?.toISOString() || subscription.createdAt.toISOString();
 
         return {
-            totalMessages: subscription.aiMessagesUsed,
-            premiumFeaturesUsed: featureUsage.map(f => ({
+            totalMessages,
+            premiumFeaturesUsed: featureUsage.map((f) => ({
                 feature: f.feature,
                 count: f.usageCount,
             })),
@@ -683,6 +722,169 @@ export class SubscriptionService {
             insightsGenerated,
             memberSince,
             currentStreak,
+            longestStreak,
+            totalDataEntries,
+            completedBadges,
         };
+    }
+
+    async getPaywallConfig(): Promise<PremiumPaywallConfig> {
+        const flag = await this.prisma.featureFlag.findUnique({
+            where: { key: PAYWALL_CONFIG_FLAG_KEY },
+        });
+        const stored = (flag?.valueJson as Partial<PremiumPaywallConfig>) || {};
+        return {
+            ...DEFAULT_PAYWALL_CONFIG,
+            ...stored,
+            plans: {
+                MONTHLY: {
+                    ...DEFAULT_PAYWALL_CONFIG.plans.MONTHLY,
+                    ...(stored.plans?.MONTHLY || {}),
+                },
+                YEARLY: {
+                    ...DEFAULT_PAYWALL_CONFIG.plans.YEARLY,
+                    ...(stored.plans?.YEARLY || {}),
+                },
+            },
+            benefits: Array.isArray(stored.benefits)
+                ? stored.benefits
+                : DEFAULT_PAYWALL_CONFIG.benefits,
+            comparisonRows: Array.isArray(stored.comparisonRows)
+                ? stored.comparisonRows
+                : DEFAULT_PAYWALL_CONFIG.comparisonRows,
+            faqs: Array.isArray(stored.faqs)
+                ? stored.faqs
+                : DEFAULT_PAYWALL_CONFIG.faqs,
+            heroHighlights: Array.isArray(stored.heroHighlights)
+                ? stored.heroHighlights
+                : DEFAULT_PAYWALL_CONFIG.heroHighlights,
+            updatedAt: flag?.updatedAt?.toISOString(),
+        };
+    }
+
+    async updatePaywallConfig(
+        payload: Partial<PremiumPaywallConfig>,
+    ): Promise<PremiumPaywallConfig> {
+        const current = await this.getPaywallConfig();
+        const next: PremiumPaywallConfig = {
+            ...current,
+            ...payload,
+            plans: {
+                MONTHLY: {
+                    ...current.plans.MONTHLY,
+                    ...(payload.plans?.MONTHLY || {}),
+                    price: Number(
+                        payload.plans?.MONTHLY?.price ?? current.plans.MONTHLY.price,
+                    ),
+                    trialDays: Number(
+                        payload.plans?.MONTHLY?.trialDays ?? current.plans.MONTHLY.trialDays,
+                    ),
+                },
+                YEARLY: {
+                    ...current.plans.YEARLY,
+                    ...(payload.plans?.YEARLY || {}),
+                    price: Number(
+                        payload.plans?.YEARLY?.price ?? current.plans.YEARLY.price,
+                    ),
+                    trialDays: Number(
+                        payload.plans?.YEARLY?.trialDays ?? current.plans.YEARLY.trialDays,
+                    ),
+                },
+            },
+            premiumAiMessageLimit: Number(
+                payload.premiumAiMessageLimit ?? current.premiumAiMessageLimit,
+            ),
+            freeAiMessageLimit: Number(
+                payload.freeAiMessageLimit ?? current.freeAiMessageLimit,
+            ),
+        };
+        delete next.updatedAt;
+
+        const saved = await this.prisma.featureFlag.upsert({
+            where: { key: PAYWALL_CONFIG_FLAG_KEY },
+            update: { valueJson: next as any },
+            create: { key: PAYWALL_CONFIG_FLAG_KEY, valueJson: next as any },
+        });
+
+        return {
+            ...next,
+            updatedAt: saved.updatedAt.toISOString(),
+        };
+    }
+
+    async resetPaywallConfig(): Promise<PremiumPaywallConfig> {
+        const saved = await this.prisma.featureFlag.upsert({
+            where: { key: PAYWALL_CONFIG_FLAG_KEY },
+            update: { valueJson: DEFAULT_PAYWALL_CONFIG as any },
+            create: {
+                key: PAYWALL_CONFIG_FLAG_KEY,
+                valueJson: DEFAULT_PAYWALL_CONFIG as any,
+            },
+        });
+        return {
+            ...DEFAULT_PAYWALL_CONFIG,
+            updatedAt: saved.updatedAt.toISOString(),
+        };
+    }
+
+    async getAdminSubscriptionOverview() {
+        const [activeCount, trialCount, freeCount, monthlyCount, yearlyCount] =
+            await Promise.all([
+                this.prisma.subscription.count({ where: { status: 'ACTIVE' } }),
+                this.prisma.subscription.count({ where: { status: 'TRIAL' } }),
+                this.prisma.subscription.count({ where: { status: 'FREE' } }),
+                this.prisma.subscription.count({
+                    where: { status: 'ACTIVE', tier: 'MONTHLY' },
+                }),
+                this.prisma.subscription.count({
+                    where: { status: 'ACTIVE', tier: 'YEARLY' },
+                }),
+            ]);
+
+        return {
+            activeCount,
+            trialCount,
+            freeCount,
+            monthlyCount,
+            yearlyCount,
+        };
+    }
+
+    async adminUpdateUserSubscription(
+        subscriptionId: string,
+        body: {
+            status?: any;
+            tier?: any;
+            endDate?: string | null;
+            aiMessagesLimit?: number;
+        },
+    ) {
+        const existing = await this.prisma.subscription.findUnique({
+            where: { id: subscriptionId },
+        });
+        if (!existing) {
+            throw new BadRequestException('Abonelik bulunamadı');
+        }
+
+        const data: any = {};
+        if (body.status !== undefined) data.status = body.status;
+        if (body.tier !== undefined) data.tier = body.tier || null;
+        if (body.endDate !== undefined) {
+            data.endDate = body.endDate ? new Date(body.endDate) : null;
+        }
+        if (body.aiMessagesLimit !== undefined) {
+            data.aiMessagesLimit = Number(body.aiMessagesLimit);
+        }
+        if (body.status === 'ACTIVE' && !existing.startDate) {
+            data.startDate = new Date();
+        }
+
+        return this.prisma.subscription.update({
+            where: { id: subscriptionId },
+            data,
+            include: {
+                user: { select: { id: true, email: true, username: true } },
+            },
+        });
     }
 }

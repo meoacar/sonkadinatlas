@@ -1,70 +1,75 @@
 import { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/useTheme';
+import type { PremiumFaqItem } from '@/types/subscription';
 
-interface FAQ {
-    question: string;
-    answer: string;
-}
-
-const FAQS: FAQ[] = [
+const DEFAULT_FAQS: PremiumFaqItem[] = [
     {
-        question: 'Premium\'u nasıl iptal edebilirim?',
-        answer: 'Ayarlar > Abonelik Yönetimi\'nden istediğiniz zaman iptal edebilirsiniz. İptal ettiğinizde mevcut dönem sonuna kadar premium özelliklerinize erişmeye devam edersiniz.',
+        id: 'f1',
+        question: "Premium'u nasıl iptal edebilirim?",
+        answer:
+            "Ayarlar > Abonelik Yönetimi'nden istediğiniz zaman iptal edebilirsiniz. Mevcut dönem sonuna kadar erişiminiz sürer.",
+        isActive: true,
     },
     {
+        id: 'f2',
         question: 'Farklı cihazlarda kullanabilir miyim?',
-        answer: 'Evet, aynı hesapla giriş yaptığınız tüm cihazlarda premium özellikler otomatik olarak aktif olur.',
+        answer:
+            'Evet, aynı hesapla giriş yaptığınız tüm cihazlarda premium özellikleriniz otomatik aktif olur.',
+        isActive: true,
     },
     {
-        question: 'İade alabilir miyim?',
-        answer: 'İlk 7 gün içinde herhangi bir nedenle tam iade alabilirsiniz. İade talebi için destek ekibimizle iletişime geçin.',
-    },
-    {
+        id: 'f3',
         question: 'Deneme süresi var mı?',
-        answer: 'Evet, ilk kez premium\'a abone olan kullanıcılar için 7 günlük ücretsiz deneme süresi sunuyoruz. Deneme süresi boyunca tüm premium özelliklere erişebilirsiniz.',
+        answer:
+            'İlk kez abone olan kullanıcılar 7 günlük ücretsiz deneme süresi boyunca tüm özellikleri deneyimleyebilir.',
+        isActive: true,
     },
     {
+        id: 'f4',
         question: 'Aylık ve yıllık plan arasındaki fark nedir?',
-        answer: 'Her iki plan da aynı özellikleri sunar. Yıllık plan ile %17 tasarruf edersiniz ve yıl boyunca kesintisiz premium erişiminiz olur.',
+        answer:
+            'Her iki plan da tüm premium özellikleri içerir. Yıllık plan ile %17 tasarruf sağlarsınız.',
+        isActive: true,
     },
     {
+        id: 'f5',
         question: 'Ödeme güvenli mi?',
-        answer: 'Evet, tüm ödemeler Apple App Store veya Google Play Store üzerinden güvenli bir şekilde işlenir. Ödeme bilgileriniz bizimle paylaşılmaz.',
+        answer:
+            'Tüm ödemeler Apple App Store veya Google Play Store altyapısı üzerinden güvenle işlenir.',
+        isActive: true,
     },
 ];
 
-export function FAQSection() {
+export function FAQSection({ faqs }: { faqs?: PremiumFaqItem[] }) {
     const router = useRouter();
     const theme = useTheme();
     const styles = createStyles(theme);
-
-    const handleTerms = () => {
-        router.push('/settings/terms-of-service' as any);
-    };
-
-    const handlePrivacy = () => {
-        router.push('/settings/privacy-policy' as any);
-    };
+    const activeFaqs = (faqs && faqs.length > 0 ? faqs : DEFAULT_FAQS).filter(
+        (f) => f.isActive !== false,
+    );
 
     return (
         <View style={styles.container}>
-            <Text style={styles.title}>Sıkça Sorulan Sorular</Text>
+            {activeFaqs.length > 0 && (
+                <>
+                    <Text style={styles.title}>Sıkça Sorulan Sorular</Text>
+                    <View style={styles.faqList}>
+                        {activeFaqs.map((faq) => (
+                            <FAQItem key={faq.id || faq.question} faq={faq} />
+                        ))}
+                    </View>
+                </>
+            )}
 
-            <View style={styles.faqList}>
-                {FAQS.map((faq, index) => (
-                    <FAQItem key={index} faq={faq} />
-                ))}
-            </View>
-
-            {/* Terms and Privacy Links */}
             <View style={styles.linksContainer}>
-                <TouchableOpacity onPress={handleTerms} style={styles.link}>
+                <TouchableOpacity onPress={() => router.push('/settings/terms-of-service' as any)}>
                     <Text style={styles.linkText}>Kullanım Koşulları</Text>
                 </TouchableOpacity>
                 <Text style={styles.separator}>•</Text>
-                <TouchableOpacity onPress={handlePrivacy} style={styles.link}>
+                <TouchableOpacity onPress={() => router.push('/settings/privacy-policy' as any)}>
                     <Text style={styles.linkText}>Gizlilik Politikası</Text>
                 </TouchableOpacity>
             </View>
@@ -72,11 +77,7 @@ export function FAQSection() {
     );
 }
 
-interface FAQItemProps {
-    faq: FAQ;
-}
-
-function FAQItem({ faq }: FAQItemProps) {
+function FAQItem({ faq }: { faq: { question: string; answer: string } }) {
     const theme = useTheme();
     const styles = createStyles(theme);
     const [isExpanded, setIsExpanded] = useState(false);
@@ -85,39 +86,38 @@ function FAQItem({ faq }: FAQItemProps) {
         <TouchableOpacity
             style={styles.faqItem}
             onPress={() => setIsExpanded(!isExpanded)}
-            activeOpacity={0.7}
+            activeOpacity={0.75}
         >
             <View style={styles.faqHeader}>
                 <Text style={styles.question}>{faq.question}</Text>
-                <Text style={[styles.chevron, isExpanded && styles.chevronExpanded]}>
-                    ›
-                </Text>
+                <Ionicons
+                    name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color={theme.colors.textSecondary}
+                />
             </View>
-            {isExpanded && (
-                <Text style={styles.answer}>{faq.answer}</Text>
-            )}
+            {isExpanded && <Text style={styles.answer}>{faq.answer}</Text>}
         </TouchableOpacity>
     );
 }
 
 const createStyles = (theme: ReturnType<typeof useTheme>) =>
     StyleSheet.create({
-        container: {
-            marginBottom: theme.spacing.xl,
-        },
+        container: {},
         title: {
-            ...theme.typography.subtitle,
+            fontSize: 16.5,
+            fontWeight: '700',
             color: theme.colors.text,
-            marginBottom: theme.spacing.lg,
+            marginBottom: 12,
         },
         faqList: {
-            gap: theme.spacing.sm,
-            marginBottom: theme.spacing.lg,
+            gap: 8,
+            marginBottom: 16,
         },
         faqItem: {
             backgroundColor: theme.colors.backgroundCard,
-            borderRadius: theme.card.borderRadius,
-            padding: theme.spacing.lg,
+            borderRadius: 14,
+            padding: 14,
             borderWidth: 1,
             borderColor: theme.colors.border,
         },
@@ -125,45 +125,34 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
+            gap: 8,
         },
         question: {
-            ...theme.typography.body,
+            fontSize: 14,
             color: theme.colors.text,
             fontWeight: '600',
             flex: 1,
-            marginRight: theme.spacing.sm,
-        },
-        chevron: {
-            fontSize: 24,
-            color: theme.colors.textSecondary,
-            transform: [{ rotate: '90deg' }],
-        },
-        chevronExpanded: {
-            transform: [{ rotate: '270deg' }],
         },
         answer: {
-            ...theme.typography.body,
+            fontSize: 13,
             color: theme.colors.textSecondary,
-            marginTop: theme.spacing.md,
-            lineHeight: 20,
+            marginTop: 8,
+            lineHeight: 19,
         },
         linksContainer: {
             flexDirection: 'row',
             justifyContent: 'center',
             alignItems: 'center',
-            gap: theme.spacing.sm,
-            paddingVertical: theme.spacing.md,
-        },
-        link: {
-            padding: theme.spacing.xs,
+            gap: 10,
+            paddingVertical: 8,
         },
         linkText: {
-            ...theme.typography.body,
+            fontSize: 13,
             color: theme.colors.primary,
-            textDecorationLine: 'underline',
+            fontWeight: '600',
         },
         separator: {
-            ...theme.typography.body,
-            color: theme.colors.textSecondary,
+            fontSize: 13,
+            color: theme.colors.textLight,
         },
     });

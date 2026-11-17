@@ -34,7 +34,7 @@ export class AdminGuard implements CanActivate {
 
         const user = await this.prisma.user.findUnique({
             where: { id: userId },
-            select: { email: true },
+            select: { email: true, isAdmin: true },
         });
 
         if (!user) {
@@ -42,7 +42,7 @@ export class AdminGuard implements CanActivate {
         }
 
         // Check if user is admin
-        const isAdmin = this.isAdminUser(user.email);
+        const isAdmin = Boolean(user.isAdmin) || this.isAdminUser(user.email);
 
         if (!isAdmin) {
             throw new ForbiddenException('Bu işlem için admin yetkisi gerekli');
@@ -59,6 +59,11 @@ export class AdminGuard implements CanActivate {
 
         // Check if email has admin domain
         if (email.endsWith('@admin.wellnesscompanion.com')) {
+            return true;
+        }
+
+        // Local development admin account
+        if (email.toLowerCase() === 'admin@wellness.local') {
             return true;
         }
 

@@ -10,10 +10,8 @@ import {
     QuestionCircleOutlined,
 } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
-import axios from 'axios';
 import { Line, Pie } from '@ant-design/charts';
-
-const API_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+import { apiClient } from '@/providers/dataProvider';
 
 export default function AIAnalyticsPage() {
     const [loading, setLoading] = useState(true);
@@ -31,15 +29,12 @@ export default function AIAnalyticsPage() {
     const fetchAnalytics = async () => {
         setLoading(true);
         try {
-            const token = localStorage.getItem('accessToken');
-            const headers = { Authorization: `Bearer ${token}` };
-
             const [statsRes, questionsRes, topicsRes, trendsRes, engagementRes] = await Promise.allSettled([
-                axios.get(`${API_URL}/chat/analytics/stats`, { headers, params: { days } }),
-                axios.get(`${API_URL}/chat/analytics/top-questions`, { headers, params: { days, limit: 10 } }),
-                axios.get(`${API_URL}/chat/analytics/popular-topics`, { headers, params: { days } }),
-                axios.get(`${API_URL}/chat/analytics/trends`, { headers, params: { days } }),
-                axios.get(`${API_URL}/chat/analytics/engagement`, { headers, params: { days } }),
+                apiClient.get('/chat/analytics/stats', { params: { days } }),
+                apiClient.get('/chat/analytics/top-questions', { params: { days, limit: 10 } }),
+                apiClient.get('/chat/analytics/popular-topics', { params: { days } }),
+                apiClient.get('/chat/analytics/trends', { params: { days } }),
+                apiClient.get('/chat/analytics/engagement', { params: { days } }),
             ]);
 
             if (statsRes.status === 'fulfilled') setStats(statsRes.value.data);
@@ -74,16 +69,14 @@ export default function AIAnalyticsPage() {
         data: trends,
         xField: 'date',
         yField: 'count',
-        smooth: true,
-        color: '#1890ff',
-        point: {
-            size: 3,
-            shape: 'circle',
+        shapeField: 'smooth',
+        style: {
+            stroke: '#1890ff',
+            lineWidth: 2,
         },
-        label: {
-            style: {
-                fill: '#aaa',
-            },
+        point: {
+            sizeField: 3,
+            shapeField: 'circle',
         },
     };
 
@@ -93,14 +86,9 @@ export default function AIAnalyticsPage() {
         colorField: 'topic',
         radius: 0.8,
         label: {
-            type: 'outer',
-            content: '{name} {percentage}',
+            text: (d: any) => `${d.topic || ''}: ${d.count ?? 0}`,
+            position: 'outside',
         },
-        interactions: [
-            {
-                type: 'element-active',
-            },
-        ],
     };
 
     if (loading) {

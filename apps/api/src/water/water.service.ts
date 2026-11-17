@@ -1,9 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { GamificationService } from '../gamification/gamification.service';
 
 @Injectable()
 export class WaterService {
-  constructor(private readonly prisma: PrismaService) { }
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => GamificationService))
+    private readonly gamificationService: GamificationService,
+  ) { }
 
   async getWaterLogs(
     userId: string,
@@ -34,13 +39,21 @@ export class WaterService {
     console.log('[WaterService] logWater called with:', { userId, data });
     console.log('[WaterService] amountMl value:', data.amountMl, 'type:', typeof data.amountMl);
 
-    return this.prisma.waterLog.create({
+    const created = await this.prisma.waterLog.create({
       data: {
         userId,
         amountMl: data.amountMl,
         loggedAt: data.loggedAt,
       },
     });
+
+    try {
+      await this.gamificationService.incrementDataEntry(userId, { wellness: true });
+    } catch (err) {
+      console.error('[WaterService] Gamification update failed:', err);
+    }
+
+    return created;
   }
 
   async getTodayTotal(userId: string) {

@@ -24,8 +24,10 @@ import {
     EyeOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import { apiClient } from '@/providers/dataProvider';
 
 const { TextArea } = Input;
+const WEB_URL = process.env.NEXT_PUBLIC_WEB_URL || 'http://localhost:3000';
 
 interface Page {
     id: string;
@@ -50,22 +52,16 @@ export default function PagesManagement() {
     const { data: pages, isLoading } = useQuery<Page[]>({
         queryKey: ['pages'],
         queryFn: async () => {
-            const res = await fetch('/api/pages');
-            if (!res.ok) throw new Error('Failed to fetch pages');
-            return res.json();
+            const { data } = await apiClient.get('/pages/admin/list');
+            return data;
         },
     });
 
     // Create mutation
     const createMutation = useMutation({
-        mutationFn: async (data: any) => {
-            const res = await fetch('/api/pages', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data),
-            });
-            if (!res.ok) throw new Error('Failed to create page');
-            return res.json();
+        mutationFn: async (payload: any) => {
+            const { data } = await apiClient.post('/pages', payload);
+            return data;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['pages'] });
@@ -80,13 +76,8 @@ export default function PagesManagement() {
     // Update mutation
     const updateMutation = useMutation({
         mutationFn: async ({ id, data }: { id: string; data: any }) => {
-            const res = await fetch(`/api/pages/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data),
-            });
-            if (!res.ok) throw new Error('Failed to update page');
-            return res.json();
+            const res = await apiClient.put(`/pages/${id}`, data);
+            return res.data;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['pages'] });
@@ -101,11 +92,8 @@ export default function PagesManagement() {
     // Delete mutation
     const deleteMutation = useMutation({
         mutationFn: async (id: string) => {
-            const res = await fetch(`/api/pages/${id}`, {
-                method: 'DELETE',
-            });
-            if (!res.ok) throw new Error('Failed to delete page');
-            return res.json();
+            const { data } = await apiClient.delete(`/pages/${id}`);
+            return data;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['pages'] });
@@ -203,8 +191,8 @@ export default function PagesManagement() {
                     <Button
                         type="text"
                         icon={<EyeOutlined />}
-                        onClick={() => window.open(`/api/pages/slug/${record.slug}`, '_blank')}
-                        title="Görüntüle"
+                        onClick={() => window.open(`${WEB_URL}/sayfa/${record.slug}`, '_blank')}
+                        title="Web Sitesinde Görüntüle"
                     />
                     <Button
                         type="text"
@@ -285,9 +273,9 @@ export default function PagesManagement() {
                         label="Slug (URL)"
                         name="slug"
                         rules={[{ required: true, message: 'Slug gereklidir' }]}
-                        extra="Örnek: privacy-policy, terms-of-use"
+                        extra="Örnek: hakkimizda, gizlilik-politikasi, kullanim-kosullari (Web sitesinde /sayfa/<slug> olarak açılır)"
                     >
-                        <Input placeholder="privacy-policy" />
+                        <Input placeholder="gizlilik-politikasi" />
                     </Form.Item>
 
                     <Form.Item

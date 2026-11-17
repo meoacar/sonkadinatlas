@@ -60,14 +60,14 @@ export default function SleepScreen() {
     };
   }, []);
 
-  const { data: sleepData, isLoading, refetch, error: sleepError } = useQuery({
+  const { data: sleepData, isLoading, refetch, error: sleepError } = useQuery<any[]>({
     queryKey: ['sleep', dateRange.fromDateStr, dateRange.toDateStr],
     queryFn: () => wellnessService.getSleep(dateRange.fromISO, dateRange.toISO),
     enabled: isAuthenticated,
     retry: false,
   });
 
-  const { data: preferences, error: prefsError } = useQuery({
+  const { data: preferences, error: prefsError } = useQuery<any>({
     queryKey: ['wellnessPreferences'],
     queryFn: () => wellnessService.getPreferences(),
     enabled: isAuthenticated,

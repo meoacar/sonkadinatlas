@@ -8,4 +8,7 @@ export class UsageStatsDto {
     insightsGenerated: number;
     memberSince: string; // ISO date string
     currentStreak: number; // days
+    longestStreak?: number;
+    totalDataEntries?: number;
+    completedBadges?: number;
 }

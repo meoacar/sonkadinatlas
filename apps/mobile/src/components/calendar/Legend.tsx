@@ -1,12 +1,14 @@
 import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView } from 'react-native';
 import { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 
 interface LegendItem {
   id: string;
   label: string;
   color: string;
-  icon: string;
+  kind: 'solid' | 'dashed' | 'soft' | 'ring' | 'dot';
+  iconName: keyof typeof Ionicons.glyphMap;
   explanation: string;
 }
 
@@ -14,72 +16,116 @@ const legendItems: LegendItem[] = [
   {
     id: 'period',
     label: 'Regl',
-    color: '#FF1493',
-    icon: '●',
+    color: '#FF4D8D',
+    kind: 'solid',
+    iconName: 'water',
     explanation:
-      'Regl günleri. Adet akışının olduğu günleri gösterir. Akış yoğunluğunu ve semptomları günlük kayıtlardan ekleyebilirsiniz.',
+      'Kaydedilmiş regl günlerini gösterir. Akış yoğunluğunu, kramp şiddetini ve semptomları ilgili güne dokunarak ekleyebilirsiniz.',
+  },
+  {
+    id: 'predicted',
+    label: 'Tahmin',
+    color: '#FF4D8D',
+    kind: 'dashed',
+    iconName: 'calendar-outline',
+    explanation:
+      'Geçmiş döngü verilerinize göre beklenen sonraki regl başlangıç gününü gösterir.',
   },
   {
     id: 'fertile',
     label: 'Verimli',
-    color: '#9C27B0',
-    icon: '○',
+    color: '#A855F7',
+    kind: 'soft',
+    iconName: 'flower-outline',
     explanation:
-      'Tahmini verimli pencere. Geçmiş döngülerinize göre hesaplanır ve hamile kalma olasılığının yüksek olduğu günleri gösterir. Bu bir tahmindir ve garanti değildir.',
+      'Tahmini verimli pencere. Doğurganlığın yüksek olduğu günleri gösterir; kesin doğum kontrolü yöntemi olarak kullanılmamalıdır.',
   },
   {
     id: 'ovulation',
     label: 'Yumurtlama',
-    color: '#FFD700',
-    icon: '⭐',
+    color: '#F59E0B',
+    kind: 'ring',
+    iconName: 'sparkles',
     explanation:
-      'Tahmini yumurtlama günü. Genellikle döngünün ortasında gerçekleşir. Daha kesin bilgi için bazal vücut ısısı ve serviks mukusu takibi önerilir.',
+      'Tahmini yumurtlama günü. Genellikle döngünün ortasında gerçekleşir.',
   },
   {
-    id: 'sex',
-    label: 'Cinsel İlişki',
-    color: '#FF69B4',
-    icon: '♥',
+    id: 'logs',
+    label: 'Kayıt',
+    color: '#06B6D4',
+    kind: 'dot',
+    iconName: 'document-text-outline',
     explanation:
-      'Cinsel ilişki kaydedildi. Korunma yöntemi ve notlarınızı günlük kayıtlardan ekleyebilirsiniz.',
-  },
-  {
-    id: 'symptom',
-    label: 'Semptom',
-    color: '#FFA500',
-    icon: '😐',
-    explanation:
-      'Semptom veya ruh hali kaydedildi. Kramp, ağrı, enerji seviyesi ve diğer fiziksel veya duygusal değişiklikleri takip edebilirsiniz.',
-  },
-  {
-    id: 'medication',
-    label: 'İlaç',
-    color: '#00CED1',
-    icon: '💊',
-    explanation:
-      'İlaç veya takviye kaydedildi. Ağrı kesici, vitamin veya diğer ilaçları not edebilirsiniz.',
-  },
-  {
-    id: 'appointment',
-    label: 'Randevu',
-    color: '#4CAF50',
-    icon: '📅',
-    explanation: 'Doktor randevusu veya önemli tarih.',
+      'Günlerin altındaki renkli noktalar o güne ruh hali, semptom, ilaç veya özel not eklendiğini gösterir.',
   },
 ];
 
 export function Legend() {
   const theme = useTheme();
   const [selectedItem, setSelectedItem] = useState<LegendItem | null>(null);
-
   const styles = createStyles(theme);
+
+  const renderSwatch = (item: LegendItem) => {
+    if (item.kind === 'solid') {
+      return <View style={[styles.swatchCircle, { backgroundColor: item.color }]} />;
+    }
+    if (item.kind === 'dashed') {
+      return (
+        <View
+          style={[
+            styles.swatchCircle,
+            {
+              borderWidth: 1.5,
+              borderStyle: 'dashed',
+              borderColor: item.color,
+              backgroundColor: 'rgba(255, 77, 141, 0.12)',
+            },
+          ]}
+        />
+      );
+    }
+    if (item.kind === 'soft') {
+      return (
+        <View
+          style={[
+            styles.swatchCircle,
+            {
+              backgroundColor: 'rgba(168, 85, 247, 0.25)',
+              borderWidth: 1,
+              borderColor: item.color,
+            },
+          ]}
+        />
+      );
+    }
+    if (item.kind === 'ring') {
+      return (
+        <View
+          style={[
+            styles.swatchCircle,
+            {
+              backgroundColor: 'rgba(245, 158, 11, 0.22)',
+              borderWidth: 1.5,
+              borderColor: item.color,
+            },
+          ]}
+        />
+      );
+    }
+    return (
+      <View style={styles.dotsSwatch}>
+        <View style={[styles.miniDot, { backgroundColor: '#F59E0B' }]} />
+        <View style={[styles.miniDot, { backgroundColor: '#8B5CF6' }]} />
+        <View style={[styles.miniDot, { backgroundColor: '#06B6D4' }]} />
+      </View>
+    );
+  };
 
   return (
     <>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        style={styles.container}
         contentContainerStyle={styles.contentContainer}
       >
         {legendItems.map((item) => (
@@ -89,7 +135,7 @@ export function Legend() {
             onPress={() => setSelectedItem(item)}
             activeOpacity={0.7}
           >
-            <Text style={[styles.icon, { color: item.color }]}>{item.icon}</Text>
+            {renderSwatch(item)}
             <Text style={styles.label}>{item.label}</Text>
           </TouchableOpacity>
         ))}
@@ -106,13 +152,26 @@ export function Legend() {
           activeOpacity={1}
           onPress={() => setSelectedItem(null)}
         >
-          <View style={styles.modalContent}>
+          <TouchableOpacity
+            activeOpacity={1}
+            style={styles.modalContent}
+            onPress={(e) => e.stopPropagation()}
+          >
             {selectedItem && (
               <>
                 <View style={styles.modalHeader}>
-                  <Text style={[styles.modalIcon, { color: selectedItem.color }]}>
-                    {selectedItem.icon}
-                  </Text>
+                  <View
+                    style={[
+                      styles.modalIconBox,
+                      { backgroundColor: `${selectedItem.color}18` },
+                    ]}
+                  >
+                    <Ionicons
+                      name={selectedItem.iconName}
+                      size={20}
+                      color={selectedItem.color}
+                    />
+                  </View>
                   <Text style={styles.modalTitle}>{selectedItem.label}</Text>
                 </View>
                 <Text style={styles.modalExplanation}>{selectedItem.explanation}</Text>
@@ -124,7 +183,7 @@ export function Legend() {
                 </TouchableOpacity>
               </>
             )}
-          </View>
+          </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
     </>
@@ -133,62 +192,72 @@ export function Legend() {
 
 const createStyles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
-    container: {
-      backgroundColor: theme.colors.backgroundCard,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
-    },
     contentContainer: {
-      padding: 12,
-      gap: 8,
+      paddingTop: 10,
+      paddingBottom: 2,
+      gap: 12,
+      alignItems: 'center',
     },
     item: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      backgroundColor: theme.colors.background,
-      borderRadius: 12,
-      marginHorizontal: 4,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
+      gap: 6,
+      paddingVertical: 4,
+      paddingHorizontal: 2,
     },
-    icon: {
-      fontSize: 14,
-      marginRight: 4,
+    swatchCircle: {
+      width: 11,
+      height: 11,
+      borderRadius: 5.5,
+    },
+    dotsSwatch: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 2,
+    },
+    miniDot: {
+      width: 4.5,
+      height: 4.5,
+      borderRadius: 2.25,
     },
     label: {
-      fontSize: 12,
-      color: theme.colors.text,
-      fontWeight: '500',
+      fontSize: 11.5,
+      color: theme.colors.textSecondary,
+      fontWeight: '600',
     },
     modalOverlay: {
       flex: 1,
       backgroundColor: 'rgba(0, 0, 0, 0.5)',
       justifyContent: 'center',
       alignItems: 'center',
-      padding: 20,
+      padding: 24,
     },
     modalContent: {
       backgroundColor: theme.colors.backgroundCard,
-      borderRadius: 16,
+      borderRadius: 20,
       padding: 20,
       width: '100%',
-      maxWidth: 400,
+      maxWidth: 360,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.25,
-      shadowRadius: 4,
-      elevation: 5,
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.2,
+      shadowRadius: 16,
+      elevation: 8,
     },
     modalHeader: {
       flexDirection: 'row',
       alignItems: 'center',
+      gap: 10,
       marginBottom: 12,
     },
-    modalIcon: {
-      fontSize: 24,
-      marginRight: 8,
+    modalIconBox: {
+      width: 36,
+      height: 36,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
     },
     modalTitle: {
       fontSize: 18,
@@ -198,18 +267,18 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     modalExplanation: {
       fontSize: 14,
       color: theme.colors.textSecondary,
-      lineHeight: 20,
-      marginBottom: 16,
+      lineHeight: 21,
+      marginBottom: 18,
     },
     closeButton: {
       backgroundColor: theme.colors.primary,
-      padding: 12,
-      borderRadius: 8,
+      borderRadius: 14,
+      paddingVertical: 12,
       alignItems: 'center',
     },
     closeButtonText: {
-      color: theme.colors.textOnPrimary,
+      color: '#FFFFFF',
       fontSize: 14,
-      fontWeight: '600',
+      fontWeight: '700',
     },
   });

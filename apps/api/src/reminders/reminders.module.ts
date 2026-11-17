@@ -5,6 +5,8 @@ import { RemindersService } from './reminders.service';
 import { ReminderSchedulerService } from './scheduler.service';
 import { PushService } from './push.service';
 import { RemindersProcessor } from './reminders.processor';
+import { PeriodNotificationsService } from './period-notifications.service';
+import { PeriodNotificationsController } from './period-notifications.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
@@ -14,13 +16,14 @@ import { PrismaModule } from '../prisma/prisma.module';
       name: 'reminders',
     }),
   ],
-  controllers: [RemindersController],
+  controllers: [RemindersController, PeriodNotificationsController],
   providers: [
     RemindersService,
     ReminderSchedulerService,
     PushService,
     RemindersProcessor,
+    PeriodNotificationsService,
   ],
-  exports: [RemindersService, PushService],
+  exports: [RemindersService, PushService, PeriodNotificationsService],
 })
 export class RemindersModule { }

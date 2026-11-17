@@ -1,155 +1,259 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import {
+    View,
+    Text,
+    StyleSheet,
+    ScrollView,
+    TouchableOpacity,
+    ActivityIndicator,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
-import { ZODIAC_SIGNS, ZodiacSign, calculateCompatibility } from '@/utils/astrology';
+import { usePremium } from '@/hooks/usePremium';
+import { UpgradePrompt } from '@/components/premium/UpgradePrompt';
+import { useAuthStore } from '@/store/authStore';
+import {
+    getZodiacSign,
+    ZODIAC_SIGNS,
+    ZodiacSign,
+    calculateCompatibility,
+} from '@/utils/astrology';
+import { astrologyApi, CompatibilityResult } from '@/services/astrologyApi';
+
+const ALL_SIGNS: ZodiacSign[] = [
+    'aries', 'taurus', 'gemini', 'cancer',
+    'leo', 'virgo', 'libra', 'scorpio',
+    'sagittarius', 'capricorn', 'aquarius', 'pisces',
+];
 
 export default function CompatibilityScreen() {
     const theme = useTheme();
+    const { isPremium } = usePremium();
+    const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
     const router = useRouter();
-    const [sign1, setSign1] = useState<ZodiacSign | null>(null);
-    const [sign2, setSign2] = useState<ZodiacSign | null>(null);
-    const [showResult, setShowResult] = useState(false);
+    const { user } = useAuthStore();
 
-    const styles = createStyles(theme);
+    const defaultUserSign = user?.profile?.dateOfBirth
+        ? getZodiacSign(new Date(user.profile.dateOfBirth))
+        : 'libra';
 
-    const allSigns: ZodiacSign[] = [
-        'aries', 'taurus', 'gemini', 'cancer',
-        'leo', 'virgo', 'libra', 'scorpio',
-        'sagittarius', 'capricorn', 'aquarius', 'pisces'
-    ];
+    const [sign1, setSign1] = useState<ZodiacSign>(defaultUserSign);
+    const [sign2, setSign2] = useState<ZodiacSign>('leo');
+    const [result, setResult] = useState<CompatibilityResult | null>(null);
+    const [loading, setLoading] = useState(false);
 
-    const handleCalculate = () => {
-        if (sign1 && sign2) {
-            setShowResult(true);
+    useEffect(() => {
+        handleCalculate(sign1, sign2);
+    }, []);
+
+    const handleCalculate = async (s1: ZodiacSign, s2: ZodiacSign) => {
+        setLoading(true);
+        try {
+            const res = await astrologyApi.calculateCompatibility(s1, s2);
+            setResult(res);
+        } catch {
+            const fallbackScore = calculateCompatibility(s1, s2);
+            setResult({
+                sign1: s1,
+                sign2: s2,
+                overallScore: fallbackScore,
+                loveScore: fallbackScore,
+                communicationScore: Math.max(52, fallbackScore - 4),
+                trustScore: Math.min(96, fallbackScore + 2),
+                headline: fallbackScore >= 80 ? 'Doğal Kozmik Uyum' : 'Dengeli Bağ',
+                advice: 'Birbirinizin güçlü yanlarını takdir ederek uyumunuzu derinleştirebilirsiniz.',
+            });
+        } finally {
+            setLoading(false);
         }
     };
 
-    const compatibility = sign1 && sign2 ? calculateCompatibility(sign1, sign2) : 0;
-
-    const getCompatibilityMessage = (score: number) => {
-        if (score >= 80) return 'Mükemmel Uyum! 💖';
-        if (score >= 70) return 'Çok İyi Uyum! 💕';
-        if (score >= 60) return 'İyi Uyum! 💗';
-        if (score >= 50) return 'Orta Uyum 💛';
-        return 'Zor Uyum 💙';
+    const selectSign1 = (s: ZodiacSign) => {
+        if (!isPremium) {
+            setShowUpgradePrompt(true);
+            return;
+        }
+        setSign1(s);
+        handleCalculate(s, sign2);
     };
+
+    const selectSign2 = (s: ZodiacSign) => {
+        if (!isPremium) {
+            setShowUpgradePrompt(true);
+            return;
+        }
+        setSign2(s);
+        handleCalculate(sign1, s);
+    };
+
+    const styles = createStyles(theme);
+    const info1 = ZODIAC_SIGNS[sign1];
+    const info2 = ZODIAC_SIGNS[sign2];
+
+    const renderMeter = (label: string, value: number, color: string) => (
+        <View style={styles.meterRow}>
+            <Text style={styles.meterLabel}>{label}</Text>
+            <View style={styles.meterTrack}>
+                <View style={[styles.meterFill, { width: `${value}%`, backgroundColor: color }]} />
+            </View>
+            <Text style={styles.meterValue}>%{value}</Text>
+        </View>
+    );
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top']}>
-            <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+            <ScrollView
+                style={styles.container}
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
+            >
                 {/* Header */}
                 <View style={styles.header}>
                     <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                        <Text style={styles.backIcon}>←</Text>
+                        <Ionicons name="chevron-back" size={20} color={theme.colors.text} />
                     </TouchableOpacity>
-                    <Text style={styles.title}>Aşk Uyum Hesaplayıcı</Text>
+                    <Text style={styles.title}>Aşk Uyumu</Text>
                     <View style={styles.headerSpacer} />
                 </View>
 
-                {/* Description */}
-                <View style={styles.description}>
-                    <Text style={styles.descriptionText}>
-                        İki burç arasındaki aşk uyumunu keşfedin. Burçları seçin ve uyum oranınızı görün!
-                    </Text>
-                </View>
+                {/* Result Hero Card */}
+                <LinearGradient
+                    colors={theme.isDark ? ['#831843', '#4C1D95'] : ['#EC4899', '#8B5CF6']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.heroCard}
+                >
+                    <View style={styles.pairRow}>
+                        <View style={styles.pairItem}>
+                            <View style={styles.pairCircle}>
+                                <Text style={styles.pairEmoji}>{info1.emoji}</Text>
+                            </View>
+                            <Text style={styles.pairName}>{info1.nameTr}</Text>
+                        </View>
 
-                {/* Sign 1 Selection */}
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Birinci Burç</Text>
-                    <View style={styles.zodiacGrid}>
-                        {allSigns.map((sign) => {
-                            const info = ZODIAC_SIGNS[sign];
-                            const isSelected = sign1 === sign;
-                            return (
-                                <TouchableOpacity
-                                    key={sign}
-                                    style={[
-                                        styles.zodiacCard,
-                                        { borderColor: info.color },
-                                        isSelected && { backgroundColor: info.color + '30' }
-                                    ]}
-                                    onPress={() => {
-                                        setSign1(sign);
-                                        setShowResult(false);
-                                    }}
-                                >
-                                    <Text style={styles.zodiacCardEmoji}>{info.emoji}</Text>
-                                    <Text style={styles.zodiacCardName}>{info.nameTr}</Text>
-                                </TouchableOpacity>
-                            );
-                        })}
+                        <View style={styles.heartBadge}>
+                            <Ionicons name="heart" size={18} color="#FFFFFF" />
+                            <Text style={styles.overallPct}>
+                                %{result?.overallScore ?? calculateCompatibility(sign1, sign2)}
+                            </Text>
+                        </View>
+
+                        <View style={styles.pairItem}>
+                            <View style={styles.pairCircle}>
+                                <Text style={styles.pairEmoji}>{info2.emoji}</Text>
+                            </View>
+                            <Text style={styles.pairName}>{info2.nameTr}</Text>
+                        </View>
                     </View>
-                </View>
 
-                {/* Sign 2 Selection */}
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>İkinci Burç</Text>
-                    <View style={styles.zodiacGrid}>
-                        {allSigns.map((sign) => {
-                            const info = ZODIAC_SIGNS[sign];
-                            const isSelected = sign2 === sign;
-                            return (
-                                <TouchableOpacity
-                                    key={sign}
-                                    style={[
-                                        styles.zodiacCard,
-                                        { borderColor: info.color },
-                                        isSelected && { backgroundColor: info.color + '30' }
-                                    ]}
-                                    onPress={() => {
-                                        setSign2(sign);
-                                        setShowResult(false);
-                                    }}
-                                >
-                                    <Text style={styles.zodiacCardEmoji}>{info.emoji}</Text>
-                                    <Text style={styles.zodiacCardName}>{info.nameTr}</Text>
-                                </TouchableOpacity>
-                            );
-                        })}
-                    </View>
-                </View>
+                    {loading ? (
+                        <ActivityIndicator color="#FFFFFF" style={{ marginVertical: 12 }} />
+                    ) : result ? (
+                        <>
+                            <Text style={styles.resultHeadline}>{result.headline}</Text>
+                            <Text style={styles.resultAdvice}>{result.advice}</Text>
+                        </>
+                    ) : null}
+                </LinearGradient>
 
-                {/* Calculate Button */}
-                {sign1 && sign2 && !showResult && (
-                    <TouchableOpacity style={styles.calculateButton} onPress={handleCalculate}>
-                        <Text style={styles.calculateButtonText}>Uyumu Hesapla</Text>
-                    </TouchableOpacity>
-                )}
-
-                {/* Result */}
-                {showResult && sign1 && sign2 && (
-                    <View style={styles.resultCard}>
-                        <View style={styles.resultHeader}>
-                            <Text style={styles.resultEmoji}>
-                                {ZODIAC_SIGNS[sign1].emoji} 💕 {ZODIAC_SIGNS[sign2].emoji}
-                            </Text>
-                            <Text style={styles.resultTitle}>
-                                {ZODIAC_SIGNS[sign1].nameTr} & {ZODIAC_SIGNS[sign2].nameTr}
-                            </Text>
-                        </View>
-
-                        <View style={styles.scoreContainer}>
-                            <Text style={styles.scoreLabel}>Uyum Oranı</Text>
-                            <Text style={styles.scoreValue}>%{compatibility}</Text>
-                            <Text style={styles.scoreMessage}>{getCompatibilityMessage(compatibility)}</Text>
-                        </View>
-
-                        <View style={styles.resultContent}>
-                            <Text style={styles.resultText}>
-                                {compatibility >= 70
-                                    ? 'Bu iki burç harika bir uyum sergiliyor! Birbirinizi anlıyor ve destekliyorsunuz.'
-                                    : compatibility >= 50
-                                        ? 'Orta düzeyde bir uyum var. İletişim ve anlayış ile güzel bir ilişki kurabilirsiniz.'
-                                        : 'Farklılıklarınız olsa da, karşılıklı saygı ve anlayış ile güzel bir ilişki mümkün.'}
-                            </Text>
-                        </View>
+                {/* Detailed Breakdown Card */}
+                {result && (
+                    <View style={styles.breakdownCard}>
+                        <Text style={styles.sectionTitle}>Uyum Dağılımı</Text>
+                        {renderMeter('Aşk & Çekim', result.loveScore, '#EC4899')}
+                        {renderMeter('İletişim', result.communicationScore, '#8B5CF6')}
+                        {renderMeter('Güven & Bağ', result.trustScore, '#10B981')}
                     </View>
                 )}
 
-                <View style={styles.bottomSpacer} />
+                {/* Sign 1 Selector */}
+                <View style={styles.selectorSection}>
+                    <Text style={styles.sectionTitle}>1. Burç ({info1.nameTr})</Text>
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.signScroll}
+                    >
+                        {ALL_SIGNS.map((s) => {
+                            const item = ZODIAC_SIGNS[s];
+                            const active = sign1 === s;
+                            return (
+                                <TouchableOpacity
+                                    key={`s1-${s}`}
+                                    style={[
+                                        styles.signPill,
+                                        active && {
+                                            backgroundColor: item.color,
+                                            borderColor: item.color,
+                                        },
+                                    ]}
+                                    onPress={() => selectSign1(s)}
+                                    activeOpacity={0.8}
+                                >
+                                    <Text style={styles.signPillEmoji}>{item.emoji}</Text>
+                                    <Text
+                                        style={[
+                                            styles.signPillText,
+                                            active && styles.signPillTextActive,
+                                        ]}
+                                    >
+                                        {item.nameTr}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
+                </View>
+
+                {/* Sign 2 Selector */}
+                <View style={styles.selectorSection}>
+                    <Text style={styles.sectionTitle}>2. Burç ({info2.nameTr})</Text>
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.signScroll}
+                    >
+                        {ALL_SIGNS.map((s) => {
+                            const item = ZODIAC_SIGNS[s];
+                            const active = sign2 === s;
+                            return (
+                                <TouchableOpacity
+                                    key={`s2-${s}`}
+                                    style={[
+                                        styles.signPill,
+                                        active && {
+                                            backgroundColor: item.color,
+                                            borderColor: item.color,
+                                        },
+                                    ]}
+                                    onPress={() => selectSign2(s)}
+                                    activeOpacity={0.8}
+                                >
+                                    <Text style={styles.signPillEmoji}>{item.emoji}</Text>
+                                    <Text
+                                        style={[
+                                            styles.signPillText,
+                                            active && styles.signPillTextActive,
+                                        ]}
+                                    >
+                                        {item.nameTr}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
+                </View>
             </ScrollView>
+
+            <UpgradePrompt
+                visible={showUpgradePrompt}
+                onClose={() => setShowUpgradePrompt(false)}
+                feature="Sınırsız Burç Uyumu Analizi"
+                description="İstediğin tüm burç eşleşmelerinde aşk, iletişim ve güven skorlarını hesaplamak için 7 gün ücretsiz Premium dene."
+            />
         </SafeAreaView>
     );
 }
@@ -163,146 +267,163 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
         container: {
             flex: 1,
         },
+        scrollContent: {
+            paddingHorizontal: 16,
+            paddingBottom: 40,
+            gap: 16,
+        },
         header: {
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'space-between',
-            paddingHorizontal: theme.spacing.lg,
-            paddingVertical: theme.spacing.md,
+            paddingTop: 6,
         },
         backButton: {
-            width: 40,
-            height: 40,
+            width: 38,
+            height: 38,
+            borderRadius: 19,
+            backgroundColor: theme.colors.backgroundCard,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
             justifyContent: 'center',
             alignItems: 'center',
         },
-        backIcon: {
-            fontSize: 24,
-            color: theme.colors.text,
-        },
         title: {
-            fontSize: 18,
-            fontWeight: '700',
+            fontSize: 20,
+            fontWeight: '800',
             color: theme.colors.text,
         },
         headerSpacer: {
-            width: 40,
+            width: 38,
         },
-        description: {
-            paddingHorizontal: theme.spacing.lg,
-            marginBottom: theme.spacing.lg,
+        heroCard: {
+            borderRadius: 24,
+            padding: 20,
+            gap: 14,
+            alignItems: 'center',
         },
-        descriptionText: {
-            fontSize: 14,
-            color: theme.colors.textSecondary,
-            textAlign: 'center',
-            lineHeight: 20,
-        },
-        section: {
-            marginBottom: theme.spacing.xl,
-        },
-        sectionTitle: {
-            fontSize: 18,
-            fontWeight: '700',
-            color: theme.colors.text,
-            paddingHorizontal: theme.spacing.lg,
-            marginBottom: theme.spacing.md,
-        },
-        zodiacGrid: {
+        pairRow: {
             flexDirection: 'row',
-            flexWrap: 'wrap',
-            paddingHorizontal: theme.spacing.lg,
-            gap: theme.spacing.sm,
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            width: '100%',
+            paddingHorizontal: 8,
         },
-        zodiacCard: {
-            width: '22%',
-            aspectRatio: 1,
-            backgroundColor: theme.colors.backgroundCard,
-            borderRadius: 12,
-            borderWidth: 2,
-            padding: theme.spacing.xs,
+        pairItem: {
+            alignItems: 'center',
+            gap: 6,
+            width: 84,
+        },
+        pairCircle: {
+            width: 58,
+            height: 58,
+            borderRadius: 29,
+            backgroundColor: 'rgba(255,255,255,0.2)',
             justifyContent: 'center',
             alignItems: 'center',
         },
-        zodiacCardEmoji: {
-            fontSize: 24,
-            marginBottom: 4,
+        pairEmoji: {
+            fontSize: 28,
         },
-        zodiacCardName: {
-            fontSize: 11,
-            fontWeight: '600',
-            color: theme.colors.text,
+        pairName: {
+            fontSize: 14,
+            fontWeight: '700',
+            color: '#FFFFFF',
+        },
+        heartBadge: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            backgroundColor: 'rgba(255,255,255,0.22)',
+            paddingHorizontal: 16,
+            paddingVertical: 10,
+            borderRadius: 22,
+        },
+        overallPct: {
+            fontSize: 22,
+            fontWeight: '800',
+            color: '#FFFFFF',
+        },
+        resultHeadline: {
+            fontSize: 17,
+            fontWeight: '800',
+            color: '#FFFFFF',
             textAlign: 'center',
         },
-        calculateButton: {
-            marginHorizontal: theme.spacing.lg,
-            marginBottom: theme.spacing.xl,
-            backgroundColor: theme.colors.primary,
-            paddingVertical: theme.spacing.md,
-            borderRadius: 12,
-            alignItems: 'center',
+        resultAdvice: {
+            fontSize: 13.5,
+            color: 'rgba(255,255,255,0.92)',
+            textAlign: 'center',
+            lineHeight: 20,
         },
-        calculateButtonText: {
-            fontSize: 16,
-            fontWeight: '700',
-            color: theme.colors.textOnPrimary,
-        },
-        resultCard: {
-            marginHorizontal: theme.spacing.lg,
-            marginBottom: theme.spacing.xl,
+        breakdownCard: {
             backgroundColor: theme.colors.backgroundCard,
             borderRadius: 20,
-            padding: theme.spacing.lg,
+            padding: 16,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            gap: 12,
+        },
+        sectionTitle: {
+            fontSize: 15.5,
+            fontWeight: '800',
+            color: theme.colors.text,
+        },
+        meterRow: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+        },
+        meterLabel: {
+            width: 88,
+            fontSize: 13,
+            fontWeight: '600',
+            color: theme.colors.textSecondary,
+        },
+        meterTrack: {
+            flex: 1,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: theme.colors.background,
+            overflow: 'hidden',
+        },
+        meterFill: {
+            height: '100%',
+            borderRadius: 4,
+        },
+        meterValue: {
+            width: 38,
+            textAlign: 'right',
+            fontSize: 13,
+            fontWeight: '700',
+            color: theme.colors.text,
+        },
+        selectorSection: {
+            gap: 10,
+        },
+        signScroll: {
+            gap: 8,
+        },
+        signPill: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            paddingHorizontal: 13,
+            paddingVertical: 9,
+            borderRadius: 16,
+            backgroundColor: theme.colors.backgroundCard,
             borderWidth: 1,
             borderColor: theme.colors.border,
         },
-        resultHeader: {
-            alignItems: 'center',
-            marginBottom: theme.spacing.lg,
+        signPillEmoji: {
+            fontSize: 16,
         },
-        resultEmoji: {
-            fontSize: 48,
-            marginBottom: theme.spacing.sm,
-        },
-        resultTitle: {
-            fontSize: 20,
+        signPillText: {
+            fontSize: 13,
             fontWeight: '700',
             color: theme.colors.text,
         },
-        scoreContainer: {
-            alignItems: 'center',
-            marginBottom: theme.spacing.lg,
-            paddingVertical: theme.spacing.lg,
-            borderTopWidth: 1,
-            borderBottomWidth: 1,
-            borderColor: theme.colors.border,
-        },
-        scoreLabel: {
-            fontSize: 14,
-            color: theme.colors.textSecondary,
-            marginBottom: theme.spacing.xs,
-        },
-        scoreValue: {
-            fontSize: 48,
-            fontWeight: '700',
-            color: theme.colors.primary,
-            marginBottom: theme.spacing.xs,
-        },
-        scoreMessage: {
-            fontSize: 18,
-            fontWeight: '600',
-            color: theme.colors.text,
-        },
-        resultContent: {
-            paddingTop: theme.spacing.md,
-        },
-        resultText: {
-            fontSize: 15,
-            lineHeight: 22,
-            color: theme.colors.text,
-            textAlign: 'center',
-        },
-        bottomSpacer: {
-            height: 40,
+        signPillTextActive: {
+            color: '#FFFFFF',
         },
     });

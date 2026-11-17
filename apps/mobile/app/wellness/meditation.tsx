@@ -9,6 +9,7 @@ import {
   Alert,
   RefreshControl,
   Vibration,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -33,7 +34,10 @@ export default function MeditationScreen() {
   const [timerSeconds, setTimerSeconds] = useState(0);
   const [selectedDuration, setSelectedDuration] = useState(60); // 1 minute default
   const [sessionType, setSessionType] = useState<'breath' | 'guided' | 'custom'>('breath');
-  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [breathingPresetTitle, setBreathingPresetTitle] = useState<string | null>(null);
+  const [breathingMode, setBreathingMode] = useState<boolean>(false);
+  const breathAnim = useRef(new Animated.Value(0.85)).current;
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const styles = createStyles(theme);
 
@@ -55,14 +59,14 @@ export default function MeditationScreen() {
     };
   }, []);
 
-  const { data: sessions, isLoading, refetch, error: sessionsError } = useQuery({
+  const { data: sessions, isLoading, refetch, error: sessionsError } = useQuery<any[]>({
     queryKey: ['meditation', dateRange.fromDateStr, dateRange.toDateStr],
     queryFn: () => wellnessService.getMeditation(dateRange.fromISO, dateRange.toISO),
     enabled: isAuthenticated,
     retry: false,
   });
 
-  const { data: preferences, error: prefsError } = useQuery({
+  const { data: preferences, error: prefsError } = useQuery<any>({
     queryKey: ['wellnessPreferences'],
     queryFn: () => wellnessService.getPreferences(),
     enabled: isAuthenticated,
@@ -177,9 +181,49 @@ export default function MeditationScreen() {
     );
   };
 
-  const startTimer = (duration: number, type: 'breath' | 'guided' | 'custom') => {
+  // 4-7-8 Breathing Phase Calculation (19s loop: 4s inhale, 7s hold, 8s exhale)
+  const getBreathPhase = (sec: number) => {
+    const cycleSec = sec % 19;
+    if (cycleSec < 4) {
+      return { phase: 'inhale', label: 'Nefes Al (4 sn)', remaining: 4 - cycleSec, color: '#10B981' };
+    }
+    if (cycleSec < 11) {
+      return { phase: 'hold', label: 'Tut (7 sn)', remaining: 11 - cycleSec, color: '#F59E0B' };
+    }
+    return { phase: 'exhale', label: 'Yavaşça Ver (8 sn)', remaining: 19 - cycleSec, color: '#8B5CF6' };
+  };
+
+  const breathPhaseInfo = breathingMode ? getBreathPhase(timerSeconds) : null;
+
+  useEffect(() => {
+    if (!breathingMode || !isTimerRunning) return;
+    const cycleSec = timerSeconds % 19;
+    if (cycleSec === 0) {
+      Animated.timing(breathAnim, {
+        toValue: 1.25,
+        duration: 3800,
+        useNativeDriver: true,
+      }).start();
+    } else if (cycleSec === 11) {
+      Animated.timing(breathAnim, {
+        toValue: 0.85,
+        duration: 7800,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [breathingMode, isTimerRunning, timerSeconds]);
+
+  const startTimer = (
+    duration: number,
+    type: 'breath' | 'guided' | 'custom',
+    presetTitle?: string,
+    use478 = false,
+  ) => {
     setSelectedDuration(duration);
     setSessionType(type);
+    setBreathingPresetTitle(presetTitle || null);
+    setBreathingMode(use478);
+    breathAnim.setValue(0.85);
     setTimerSeconds(0);
     setIsTimerRunning(true);
     setTimerModalVisible(true);
@@ -203,6 +247,9 @@ export default function MeditationScreen() {
     setTimerSeconds(0);
     setSelectedDuration(60);
     setSessionType('breath');
+    setBreathingMode(false);
+    setBreathingPresetTitle(null);
+    breathAnim.setValue(0.85);
   };
 
   const handleRefresh = async () => {
@@ -387,6 +434,40 @@ export default function MeditationScreen() {
           </View>
         </View>
 
+        {/* 4-7-8 Breathing & Relief Presets */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>🫁 4-7-8 Nefes & Rahatlama</Text>
+          <Text style={styles.breathCardSub}>
+            4 sn nefes al • 7 sn tut • 8 sn ver tekniği ile sinir sistemini sakinleştir.
+          </Text>
+          <View style={styles.breathPresetRow}>
+            <TouchableOpacity
+              style={styles.breathPresetBtn}
+              onPress={() => startTimer(240, 'breath', 'Kramp & Ağrı Rahatlatma', true)}
+            >
+              <Text style={styles.breathPresetEmoji}>🌸</Text>
+              <Text style={styles.breathPresetTitle}>Kramp Rahatlatıcı</Text>
+              <Text style={styles.breathPresetDuration}>4 dk</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.breathPresetBtn}
+              onPress={() => startTimer(300, 'breath', 'Derin Uyku Hazırlığı', true)}
+            >
+              <Text style={styles.breathPresetEmoji}>🌙</Text>
+              <Text style={styles.breathPresetTitle}>Uyku Hazırlığı</Text>
+              <Text style={styles.breathPresetDuration}>5 dk</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.breathPresetBtn}
+              onPress={() => startTimer(120, 'breath', 'Hızlı Stres Azaltma', true)}
+            >
+              <Text style={styles.breathPresetEmoji}>✨</Text>
+              <Text style={styles.breathPresetTitle}>Hızlı Stres</Text>
+              <Text style={styles.breathPresetDuration}>2 dk</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* Quick Start */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Hızlı Başlat</Text>
@@ -496,12 +577,37 @@ export default function MeditationScreen() {
       >
         <View style={styles.timerModalOverlay}>
           <View style={styles.timerModalContent}>
-            <Text style={styles.timerTitle}>{getTypeLabel(sessionType)}</Text>
+            <Text style={styles.timerTitle}>
+              {breathingPresetTitle || getTypeLabel(sessionType)}
+            </Text>
 
-            <View style={styles.timerCircle}>
-              <Text style={styles.timerTime}>{formatTime(timerSeconds)}</Text>
-              <Text style={styles.timerGoal}>/ {formatTime(selectedDuration)}</Text>
-            </View>
+            {breathingMode && breathPhaseInfo ? (
+              <View style={styles.breathModalWrap}>
+                <Animated.View
+                  style={[
+                    styles.breathOuterCircle,
+                    {
+                      borderColor: breathPhaseInfo.color,
+                      backgroundColor: `${breathPhaseInfo.color}20`,
+                      transform: [{ scale: breathAnim }],
+                    },
+                  ]}
+                >
+                  <Text style={[styles.breathPhaseLabel, { color: breathPhaseInfo.color }]}>
+                    {breathPhaseInfo.label}
+                  </Text>
+                  <Text style={styles.breathCountdown}>{breathPhaseInfo.remaining} sn</Text>
+                </Animated.View>
+                <Text style={styles.timerGoal}>
+                  {formatTime(timerSeconds)} / {formatTime(selectedDuration)}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.timerCircle}>
+                <Text style={styles.timerTime}>{formatTime(timerSeconds)}</Text>
+                <Text style={styles.timerGoal}>/ {formatTime(selectedDuration)}</Text>
+              </View>
+            )}
 
             <View style={styles.timerProgress}>
               <View style={styles.timerProgressBackground}>
@@ -997,5 +1103,65 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       fontSize: 16,
       fontWeight: '600',
       color: theme.colors.text,
+    },
+    breathCardSub: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      marginBottom: 12,
+      lineHeight: 18,
+    },
+    breathPresetRow: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    breathPresetBtn: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+      borderRadius: 12,
+      padding: 10,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    breathPresetEmoji: {
+      fontSize: 22,
+      marginBottom: 4,
+    },
+    breathPresetTitle: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: theme.colors.text,
+      textAlign: 'center',
+    },
+    breathPresetDuration: {
+      fontSize: 11,
+      color: theme.colors.primary,
+      fontWeight: '600',
+      marginTop: 2,
+    },
+    breathModalWrap: {
+      alignItems: 'center',
+      marginVertical: 16,
+    },
+    breathOuterCircle: {
+      width: 170,
+      height: 170,
+      borderRadius: 85,
+      borderWidth: 4,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 22,
+    },
+    breathPhaseLabel: {
+      fontSize: 15,
+      fontWeight: '700',
+      textAlign: 'center',
+      paddingHorizontal: 10,
+    },
+    breathCountdown: {
+      fontSize: 28,
+      fontWeight: '800',
+      color: theme.colors.text,
+      marginTop: 4,
     },
   });

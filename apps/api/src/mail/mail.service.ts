@@ -159,4 +159,33 @@ ${appName} ile sağlıklı günler!
       throw error;
     }
   }
+
+  async sendAdminBroadcastEmail(to: string, subject: string, body: string): Promise<void> {
+    const escapedBody = body
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br />');
+
+    await this.transporter.sendMail({
+      from: this.configService.get<string>('SMTP_FROM', 'no-reply@local.test'),
+      to,
+      subject,
+      text: body,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1f2937;">
+          <div style="background: linear-gradient(135deg, #EC4899 0%, #8B5CF6 100%); padding: 20px 24px; border-radius: 16px 16px 0 0; color: #ffffff;">
+            <h2 style="margin: 0; font-size: 20px;">Kadın Atlası</h2>
+          </div>
+          <div style="background: #ffffff; border: 1px solid #f3e8ff; border-top: none; border-radius: 0 0 16px 16px; padding: 24px; line-height: 1.65;">
+            <p style="margin-top: 0;">${escapedBody}</p>
+            <hr style="border: none; border-top: 1px solid #f3f4f6; margin: 24px 0;" />
+            <p style="font-size: 12px; color: #9ca3af; margin-bottom: 0;">
+              Bu e-posta Kadın Atlası yöneticileri tarafından bilgilendirme amacıyla gönderilmiştir.
+            </p>
+          </div>
+        </div>
+      `,
+    });
+  }
 }

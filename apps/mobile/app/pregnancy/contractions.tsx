@@ -39,7 +39,7 @@ export default function ContractionsScreen() {
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [intensity, setIntensity] = useState(5);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fetch recent contractions
   const { data: contractions } = useQuery({

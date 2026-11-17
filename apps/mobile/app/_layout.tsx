@@ -14,6 +14,7 @@ import { queryClient } from '../src/lib/queryClient';
 import { iapManager } from '../src/services/iap.wrapper';
 import { subscriptionSyncService } from '../src/services/subscriptionSync';
 import { AnimatedSplash } from '../src/components/AnimatedSplash';
+import { AccountStatusModal } from '../src/components/AccountStatusModal';
 
 // Initialize monitoring (will be enabled after package installation)
 // import { initSentry } from '../src/lib/sentry';
@@ -31,11 +32,22 @@ function AppContent() {
   const { registerForPushNotifications } = useNotifications();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const initialize = useAuthStore((state) => state.initialize);
+  const refreshMe = useAuthStore((state) => state.refreshMe);
+  const forcedLogoutReason = useAuthStore((state) => state.forcedLogoutReason);
+  const forcedLogoutEmail = useAuthStore((state) => state.forcedLogoutEmail);
+  const forcedLogoutName = useAuthStore((state) => state.forcedLogoutName);
+  const clearForcedLogoutReason = useAuthStore((state) => state.clearForcedLogoutReason);
   const isLoading = useAuthStore((state) => state.isLoading);
   const router = useRouter();
   const [pinCheckComplete, setPinCheckComplete] = useState(false);
   const [showAnimatedSplash, setShowAnimatedSplash] = useState(true);
   const [appIsReady, setAppIsReady] = useState(false);
+  const [suspendedNotice, setSuspendedNotice] = useState<{
+    visible: boolean;
+    message: string | null;
+    email: string | null;
+    name: string | null;
+  }>({ visible: false, message: null, email: null, name: null });
 
   // Initialize QnA notification handler
   useQnaNotificationHandler();
@@ -111,16 +123,33 @@ function AppContent() {
     }
   }, [isAuthenticated, isLoading]);
 
+  // Handle forced logout (e.g. admin suspended/deleted account mid-session)
+  useEffect(() => {
+    if (!forcedLogoutReason) return;
+    setSuspendedNotice({
+      visible: true,
+      message: forcedLogoutReason,
+      email: forcedLogoutEmail,
+      name: forcedLogoutName,
+    });
+    clearForcedLogoutReason();
+    router.replace('/(auth)/signin');
+  }, [
+    forcedLogoutReason,
+    forcedLogoutEmail,
+    forcedLogoutName,
+    clearForcedLogoutReason,
+    router,
+  ]);
+
   // Handle app state changes (foreground/background)
-  // Sync subscription when app comes to foreground
-  // Requirement 14.4: THE System SHALL kullanıcının tüm cihazlarında premium erişimi sağlar
-  // Requirement 14.5: WHEN abonelik durumu değiştiğinde, THE System SHALL tüm cihazları günceller
+  // Sync subscription & user status when app comes to foreground
   useEffect(() => {
     if (!isAuthenticated) return;
 
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (nextAppState === 'active') {
-        // App came to foreground, check if we should sync
+        refreshMe().catch(() => {});
         if (subscriptionSyncService.shouldSync()) {
           console.log('[App] App foregrounded, syncing subscription...');
           subscriptionSyncService.syncSubscriptionStatus().catch((error) => {
@@ -135,7 +164,7 @@ function AppContent() {
     return () => {
       subscription.remove();
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, refreshMe]);
 
   // Check for PIN lock ONLY on app start (once)
   useEffect(() => {
@@ -189,6 +218,16 @@ function AppContent() {
           }}
         />
       )}
+      <AccountStatusModal
+        visible={suspendedNotice.visible}
+        initialView="suspended"
+        reasonMessage={suspendedNotice.message}
+        prefillEmail={suspendedNotice.email}
+        prefillName={suspendedNotice.name}
+        onClose={() =>
+          setSuspendedNotice((prev) => ({ ...prev, visible: false }))
+        }
+      />
     </View>
   );
 }

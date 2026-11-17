@@ -139,7 +139,7 @@ export default function BirthPlanScreen() {
   const [hasChanges, setHasChanges] = useState(false);
 
   // Fetch birth plan
-  const { data: birthPlan, isLoading } = useQuery({
+  const { data: birthPlan, isLoading } = useQuery<any>({
     queryKey: ['birthPlan'],
     queryFn: () => pregnancyService.getBirthPlan(),
   });

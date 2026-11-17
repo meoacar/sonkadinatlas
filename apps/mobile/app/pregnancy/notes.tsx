@@ -26,7 +26,7 @@ export default function PregnancyNotesScreen() {
   const [tags, setTags] = useState('');
 
   // Fetch notes
-  const { data: notes, isLoading } = useQuery({
+  const { data: notes, isLoading } = useQuery<any[]>({
     queryKey: ['pregnancy', 'notes'],
     queryFn: () => pregnancyService.getNotes(),
   });

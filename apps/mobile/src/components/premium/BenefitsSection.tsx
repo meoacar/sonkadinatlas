@@ -1,130 +1,130 @@
 import { View, Text, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
+import type { PremiumBenefitItem } from '@/types/subscription';
 
-interface Benefit {
-    icon: string;
-    title: string;
-    description: string;
-}
-
-const BENEFITS: Benefit[] = [
+const DEFAULT_BENEFITS: PremiumBenefitItem[] = [
     {
-        icon: '🧠',
+        id: 'b1',
+        icon: 'hardware-chip-outline',
+        color: '#8B5CF6',
         title: 'Gelişmiş Hafıza',
-        description: 'AI asistanınız sizi daha iyi hatırlıyor ve kişiselleştirilmiş yanıtlar veriyor',
+        description: 'NOVA seni ve döngü geçmişini hatırlayarak yanıt verir',
+        isActive: true,
     },
     {
-        icon: '⚡',
-        title: 'Öncelikli Yanıt',
-        description: 'Sorularınıza daha hızlı ve detaylı yanıtlar alın',
+        id: 'b2',
+        icon: 'flash-outline',
+        color: '#F59E0B',
+        title: 'Öncelikli Hız',
+        description: 'Yoğun saatlerde bile anında ve detaylı yanıtlar al',
+        isActive: true,
     },
     {
-        icon: '✨',
-        title: 'Özel Özellikler',
-        description: 'Sadece premium kullanıcılara özel içgörüler ve öneriler',
+        id: 'b3',
+        icon: 'bulb-outline',
+        color: '#EC4899',
+        title: 'Kişisel İçgörüler',
+        description: 'Semptom, uyku ve ruh hali verilerine özel analizler',
+        isActive: true,
     },
     {
-        icon: '🎯',
-        title: 'Kişiselleştirilmiş İçgörüler',
-        description: 'Sağlık verilerinize özel analizler ve öneriler',
+        id: 'b4',
+        icon: 'planet-outline',
+        color: '#6366F1',
+        title: 'Astroloji Uyumu',
+        description: 'Doğum haritası ve günlük kozmik rehberlik',
+        isActive: true,
     },
     {
-        icon: '📈',
-        title: 'Gelişmiş Analizler',
-        description: 'Detaylı raporlar ve trendler ile sağlığınızı daha iyi anlayın',
+        id: 'b5',
+        icon: 'analytics-outline',
+        color: '#3B82F6',
+        title: 'Detaylı Raporlar',
+        description: 'Döngü ve wellness trendlerini derinlemesine incele',
+        isActive: true,
     },
     {
-        icon: '💬',
-        title: 'Sınırsız Konuşma',
-        description: 'Ayda 1000 mesaj ile AI asistanınızla daha fazla etkileşim',
+        id: 'b6',
+        icon: 'chatbubbles-outline',
+        color: '#10B981',
+        title: 'Yüksek Mesaj Kotası',
+        description: 'Aylık 1000+ mesaj ile kesintisiz AI desteği',
+        isActive: true,
     },
 ];
 
-export function BenefitsSection() {
+export function BenefitsSection({ items }: { items?: PremiumBenefitItem[] }) {
     const theme = useTheme();
     const styles = createStyles(theme);
+    const activeItems = (items && items.length > 0 ? items : DEFAULT_BENEFITS).filter(
+        (b) => b.isActive !== false,
+    );
+
+    if (activeItems.length === 0) return null;
 
     return (
         <View style={styles.container}>
-            <Text style={styles.title}>Premium Avantajları</Text>
-            <Text style={styles.subtitle}>
-                Premium üyelikle elde edeceğiniz tüm avantajlar
-            </Text>
-
+            <Text style={styles.title}>Neler Kazanacaksın?</Text>
             <View style={styles.benefitsGrid}>
-                {BENEFITS.map((benefit, index) => (
-                    <BenefitCard key={index} benefit={benefit} />
+                {activeItems.map((benefit) => (
+                    <View key={benefit.id || benefit.title} style={styles.benefitCard}>
+                        <View style={[styles.iconContainer, { backgroundColor: `${benefit.color || '#8B5CF6'}16` }]}>
+                            <Ionicons
+                                name={(benefit.icon as keyof typeof Ionicons.glyphMap) || 'sparkles'}
+                                size={20}
+                                color={benefit.color || '#8B5CF6'}
+                            />
+                        </View>
+                        <Text style={styles.benefitTitle}>{benefit.title}</Text>
+                        <Text style={styles.benefitDescription}>{benefit.description}</Text>
+                    </View>
                 ))}
             </View>
         </View>
     );
 }
 
-interface BenefitCardProps {
-    benefit: Benefit;
-}
-
-function BenefitCard({ benefit }: BenefitCardProps) {
-    const theme = useTheme();
-    const styles = createStyles(theme);
-
-    return (
-        <View style={styles.benefitCard}>
-            <View style={styles.iconContainer}>
-                <Text style={styles.icon}>{benefit.icon}</Text>
-            </View>
-            <Text style={styles.benefitTitle}>{benefit.title}</Text>
-            <Text style={styles.benefitDescription}>{benefit.description}</Text>
-        </View>
-    );
-}
-
 const createStyles = (theme: ReturnType<typeof useTheme>) =>
     StyleSheet.create({
-        container: {
-            marginBottom: theme.spacing.xl,
-        },
+        container: {},
         title: {
-            ...theme.typography.subtitle,
+            fontSize: 16.5,
+            fontWeight: '700',
             color: theme.colors.text,
-            marginBottom: theme.spacing.xs,
-        },
-        subtitle: {
-            ...theme.typography.body,
-            color: theme.colors.textSecondary,
-            marginBottom: theme.spacing.lg,
+            marginBottom: 12,
         },
         benefitsGrid: {
-            gap: theme.spacing.md,
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            justifyContent: 'space-between',
+            rowGap: 10,
         },
         benefitCard: {
+            width: '48.5%',
             backgroundColor: theme.colors.backgroundCard,
-            borderRadius: theme.card.borderRadius,
-            padding: theme.spacing.lg,
+            borderRadius: 16,
+            padding: 14,
             borderWidth: 1,
             borderColor: theme.colors.border,
         },
         iconContainer: {
-            width: 48,
-            height: 48,
-            borderRadius: 24,
-            backgroundColor: theme.colors.backgroundSecondary,
+            width: 38,
+            height: 38,
+            borderRadius: 12,
             justifyContent: 'center',
             alignItems: 'center',
-            marginBottom: theme.spacing.md,
-        },
-        icon: {
-            fontSize: 24,
+            marginBottom: 10,
         },
         benefitTitle: {
-            ...theme.typography.subtitle,
+            fontSize: 14,
+            fontWeight: '700',
             color: theme.colors.text,
-            marginBottom: theme.spacing.xs,
-            fontSize: 16,
+            marginBottom: 4,
         },
         benefitDescription: {
-            ...theme.typography.body,
+            fontSize: 12,
             color: theme.colors.textSecondary,
-            lineHeight: 20,
+            lineHeight: 17,
         },
     });

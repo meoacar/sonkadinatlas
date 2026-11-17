@@ -79,6 +79,11 @@ export class AIProviderController {
         };
     }
 
+    @Post(':provider/test')
+    async testConnection(@Param('provider') provider: AIProvider) {
+        return this.aiProviderService.testConnection(provider);
+    }
+
     @Delete(':provider')
     async delete(@Param('provider') provider: AIProvider) {
         await this.aiProviderService.delete(provider);

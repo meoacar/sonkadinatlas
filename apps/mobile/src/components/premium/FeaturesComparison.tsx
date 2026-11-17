@@ -1,110 +1,83 @@
 import { View, Text, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
+import type { PremiumComparisonRow } from '@/types/subscription';
 
-interface Feature {
-    icon: string;
-    title: string;
-    free: string | boolean;
-    premium: string | boolean;
-}
-
-const FEATURES: Feature[] = [
-    {
-        icon: '🤖',
-        title: 'AI Modeli',
-        free: 'Temel',
-        premium: 'Gelişmiş',
-    },
-    {
-        icon: '💬',
-        title: 'Aylık Mesaj',
-        free: '100',
-        premium: '1000',
-    },
-    {
-        icon: '⚡',
-        title: 'Yanıt Hızı',
-        free: 'Normal',
-        premium: 'Öncelikli',
-    },
-    {
-        icon: '🎯',
-        title: 'Kişisel İçgörüler',
-        free: false,
-        premium: true,
-    },
-    {
-        icon: '📈',
-        title: 'Gelişmiş Analizler',
-        free: false,
-        premium: true,
-    },
-    {
-        icon: '🧠',
-        title: 'Gelişmiş Hafıza',
-        free: false,
-        premium: true,
-    },
+const DEFAULT_ROWS: PremiumComparisonRow[] = [
+    { id: 'c1', icon: 'sparkles', color: '#8B5CF6', title: 'AI Modeli', freeValue: 'Temel', premiumValue: 'Gelişmiş', isActive: true },
+    { id: 'c2', icon: 'chatbubbles-outline', color: '#3B82F6', title: 'Aylık Mesaj', freeValue: '100', premiumValue: '1000+', isActive: true },
+    { id: 'c3', icon: 'flash-outline', color: '#F59E0B', title: 'Yanıt Hızı', freeValue: 'Normal', premiumValue: 'Öncelikli', isActive: true },
+    { id: 'c4', icon: 'bulb-outline', color: '#EC4899', title: 'Kişisel İçgörüler', freeValue: false, premiumValue: true, isActive: true },
+    { id: 'c5', icon: 'planet-outline', color: '#6366F1', title: 'Derin Astroloji', freeValue: false, premiumValue: true, isActive: true },
+    { id: 'c6', icon: 'hardware-chip-outline', color: '#10B981', title: 'Gelişmiş Hafıza', freeValue: false, premiumValue: true, isActive: true },
 ];
 
-export function FeaturesComparison() {
+export function FeaturesComparison({ rows }: { rows?: PremiumComparisonRow[] }) {
     const theme = useTheme();
     const styles = createStyles(theme);
+    const activeRows = (rows && rows.length > 0 ? rows : DEFAULT_ROWS).filter(
+        (r) => r.isActive !== false,
+    );
+
+    if (activeRows.length === 0) return null;
+
+    const renderValue = (value: string | boolean, isPremiumCol: boolean) => {
+        if (typeof value === 'boolean') {
+            return (
+                <Ionicons
+                    name={value ? 'checkmark-circle' : 'remove-outline'}
+                    size={19}
+                    color={value ? '#10B981' : theme.colors.textLight}
+                />
+            );
+        }
+        return (
+            <Text style={[styles.valueText, isPremiumCol && styles.premiumValueText]}>
+                {value}
+            </Text>
+        );
+    };
 
     return (
         <View style={styles.container}>
-            <Text style={styles.title}>Özellikler</Text>
+            <Text style={styles.title}>Ücretsiz vs Premium</Text>
 
-            {/* Header Row */}
             <View style={styles.headerRow}>
-                <View style={styles.featureColumn} />
-                <View style={styles.planColumn}>
-                    <Text style={styles.planHeader}>Ücretsiz</Text>
+                <View style={styles.featureColumn}>
+                    <Text style={styles.colLabel}>Özellik</Text>
                 </View>
                 <View style={styles.planColumn}>
+                    <Text style={styles.planHeader}>Standart</Text>
+                </View>
+                <View style={[styles.planColumn, styles.premiumHeaderBox]}>
                     <Text style={[styles.planHeader, styles.premiumHeader]}>Premium</Text>
                 </View>
             </View>
 
-            {/* Feature Rows */}
-            {FEATURES.map((feature, index) => (
-                <FeatureRow key={index} feature={feature} />
+            {activeRows.map((feature, index) => (
+                <View
+                    key={feature.id || feature.title}
+                    style={[
+                        styles.featureRow,
+                        index === activeRows.length - 1 && styles.featureRowLast,
+                    ]}
+                >
+                    <View style={styles.featureColumn}>
+                        <View style={[styles.iconBox, { backgroundColor: `${feature.color || '#8B5CF6'}15` }]}>
+                            <Ionicons
+                                name={(feature.icon as keyof typeof Ionicons.glyphMap) || 'sparkles'}
+                                size={15}
+                                color={feature.color || '#8B5CF6'}
+                            />
+                        </View>
+                        <Text style={styles.featureTitle}>{feature.title}</Text>
+                    </View>
+                    <View style={styles.planColumn}>{renderValue(feature.freeValue, false)}</View>
+                    <View style={[styles.planColumn, styles.premiumColumn]}>
+                        {renderValue(feature.premiumValue, true)}
+                    </View>
+                </View>
             ))}
-        </View>
-    );
-}
-
-interface FeatureRowProps {
-    feature: Feature;
-}
-
-function FeatureRow({ feature }: FeatureRowProps) {
-    const theme = useTheme();
-    const styles = createStyles(theme);
-
-    const renderValue = (value: string | boolean) => {
-        if (typeof value === 'boolean') {
-            return (
-                <Text style={styles.checkmark}>
-                    {value ? '✓' : '—'}
-                </Text>
-            );
-        }
-        return <Text style={styles.valueText}>{value}</Text>;
-    };
-
-    return (
-        <View style={styles.featureRow}>
-            <View style={styles.featureColumn}>
-                <Text style={styles.featureIcon}>{feature.icon}</Text>
-                <Text style={styles.featureTitle}>{feature.title}</Text>
-            </View>
-            <View style={styles.planColumn}>
-                {renderValue(feature.free)}
-            </View>
-            <View style={[styles.planColumn, styles.premiumColumn]}>
-                {renderValue(feature.premium)}
-            </View>
         </View>
     );
 }
@@ -113,69 +86,90 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     StyleSheet.create({
         container: {
             backgroundColor: theme.colors.backgroundCard,
-            borderRadius: theme.card.borderRadius,
-            padding: theme.spacing.lg,
+            borderRadius: 18,
+            padding: 16,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
         },
         title: {
-            ...theme.typography.subtitle,
+            fontSize: 16.5,
+            fontWeight: '700',
             color: theme.colors.text,
-            marginBottom: theme.spacing.lg,
+            marginBottom: 14,
         },
         headerRow: {
             flexDirection: 'row',
-            marginBottom: theme.spacing.md,
-            paddingBottom: theme.spacing.sm,
+            alignItems: 'center',
+            paddingBottom: 10,
             borderBottomWidth: 1,
             borderBottomColor: theme.colors.border,
+        },
+        colLabel: {
+            fontSize: 11.5,
+            fontWeight: '700',
+            color: theme.colors.textLight,
+            textTransform: 'uppercase',
         },
         featureRow: {
             flexDirection: 'row',
-            paddingVertical: theme.spacing.md,
+            alignItems: 'center',
+            paddingVertical: 11,
             borderBottomWidth: 1,
             borderBottomColor: theme.colors.border,
         },
+        featureRowLast: {
+            borderBottomWidth: 0,
+            paddingBottom: 2,
+        },
         featureColumn: {
-            flex: 2,
+            flex: 2.1,
             flexDirection: 'row',
             alignItems: 'center',
+            gap: 9,
+        },
+        iconBox: {
+            width: 28,
+            height: 28,
+            borderRadius: 8,
+            alignItems: 'center',
+            justifyContent: 'center',
         },
         planColumn: {
             flex: 1,
             alignItems: 'center',
             justifyContent: 'center',
+            paddingVertical: 4,
+        },
+        premiumHeaderBox: {
+            backgroundColor: 'rgba(139, 92, 246, 0.1)',
+            borderRadius: 8,
         },
         premiumColumn: {
-            backgroundColor: theme.colors.backgroundSecondary,
-            marginLeft: theme.spacing.xs,
+            backgroundColor: 'rgba(139, 92, 246, 0.06)',
             borderRadius: 8,
         },
         planHeader: {
-            ...theme.typography.caption,
+            fontSize: 11,
             color: theme.colors.textSecondary,
             fontWeight: '700',
             textTransform: 'uppercase',
-            letterSpacing: 0.5,
         },
         premiumHeader: {
             color: theme.colors.primary,
         },
-        featureIcon: {
-            fontSize: 20,
-            marginRight: theme.spacing.sm,
-        },
         featureTitle: {
-            ...theme.typography.body,
+            fontSize: 13.5,
+            fontWeight: '600',
             color: theme.colors.text,
             flex: 1,
         },
         valueText: {
-            ...theme.typography.body,
-            color: theme.colors.text,
+            fontSize: 12.5,
+            color: theme.colors.textSecondary,
             fontWeight: '600',
         },
-        checkmark: {
-            fontSize: 20,
+        premiumValueText: {
+            color: theme.colors.primary,
             fontWeight: '700',
-            color: theme.colors.success,
         },
     });

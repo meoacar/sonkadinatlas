@@ -108,28 +108,31 @@ export class ChatService {
     let maxTokens = 1024;
 
     if (modelPolicy) {
-      // Use model policy configuration
+      // Use model policy configuration with automatic active/env fallback
       this.logger.log(`Using model policy: ${modelPolicy.provider}/${modelPolicy.modelName}`);
 
       const providerConfig = await this.aiProviderService.getByProvider(modelPolicy.provider);
-      if (!providerConfig || !providerConfig.isActive) {
-        throw new Error(`Provider ${modelPolicy.provider} is not available`);
+      if (providerConfig && providerConfig.isActive) {
+        model = this.getModelFromConfig(
+          modelPolicy.provider,
+          modelPolicy.modelName,
+          providerConfig.apiKey
+        );
+        temperature = modelPolicy.temperature;
+        maxTokens = modelPolicy.maxTokens;
+      } else {
+        this.logger.warn(
+          `Model policy provider "${modelPolicy.provider}" is not active/configured; falling back to active provider.`,
+        );
       }
+    }
 
-      model = this.getModelFromConfig(
-        modelPolicy.provider,
-        modelPolicy.modelName,
-        providerConfig.apiKey
-      );
-      temperature = modelPolicy.temperature;
-      maxTokens = modelPolicy.maxTokens;
-    } else {
-      // Fallback to active provider
-      this.logger.log('No model policy found, checking active providers...');
+    if (!model) {
+      // Fallback to active provider in DB
       const providerConfig = await this.aiProviderService.getActiveProvider();
 
       if (providerConfig) {
-        this.logger.log(`✅ Using active provider: ${providerConfig.provider}, model: ${providerConfig.modelName}`);
+        this.logger.log(`✅ Using active fallback provider: ${providerConfig.provider}, model: ${providerConfig.modelName}`);
         model = this.getModelFromConfig(providerConfig.provider, providerConfig.modelName, providerConfig.apiKey);
       } else {
         // Final fallback to environment variable
@@ -149,6 +152,7 @@ export class ChatService {
       system: systemPrompt,
       messages,
       temperature,
+      maxOutputTokens: maxTokens,
     });
 
     return result;

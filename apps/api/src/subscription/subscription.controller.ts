@@ -2,6 +2,8 @@ import {
     Controller,
     Get,
     Post,
+    Put,
+    Patch,
     Body,
     Query,
     Param,
@@ -73,47 +75,34 @@ export class SubscriptionController {
     @Get('products')
     @UseGuards(AuthGuard('jwt'))
     async getProducts(@Query('platform') platform: 'ios' | 'android'): Promise<ProductDto[]> {
-        // Product definitions
-        // In production, these would come from a database or config
-        const products: ProductDto[] = [
-            {
-                productId: platform === 'ios'
-                    ? 'com.wellness.premium.monthly'
-                    : 'premium_monthly',
-                tier: 'MONTHLY',
-                price: 99,
-                currency: 'TRY',
-                description: 'Aylık Premium Abonelik',
-                features: [
-                    'Gelişmiş AI modeli',
-                    '1000 mesaj/ay',
-                    'Öncelikli yanıt',
-                    'Kişisel içgörüler',
-                    'Gelişmiş analizler',
-                ],
-                trialDays: 7,
-            },
-            {
-                productId: platform === 'ios'
-                    ? 'com.wellness.premium.yearly'
-                    : 'premium_yearly',
-                tier: 'YEARLY',
-                price: 999,
-                currency: 'TRY',
-                description: 'Yıllık Premium Abonelik',
-                features: [
-                    'Gelişmiş AI modeli',
-                    '1000 mesaj/ay',
-                    'Öncelikli yanıt',
-                    'Kişisel içgörüler',
-                    'Gelişmiş analizler',
-                    '%17 tasarruf',
-                ],
-                trialDays: 7,
-            },
-        ];
+        const config = await this.subscriptionService.getPaywallConfig();
+        const plans = [config.plans.MONTHLY, config.plans.YEARLY].filter((p) => p.isActive);
+        return plans.map((plan) => ({
+            productId: platform === 'ios' ? plan.iosProductId : plan.androidProductId,
+            tier: plan.tier,
+            price: plan.price,
+            currency: plan.currency,
+            description: plan.title,
+            features: plan.features,
+            trialDays: config.trialEnabled ? plan.trialDays : 0,
+        }));
+    }
 
-        return products;
+    /**
+     * Get live Paywall & Plan configuration for website (public, read-only)
+     */
+    @Get('public/paywall-config')
+    async getPublicPaywallConfig() {
+        return this.subscriptionService.getPaywallConfig();
+    }
+
+    /**
+     * Get live Paywall & Plan configuration for mobile app
+     */
+    @Get('paywall-config')
+    @UseGuards(AuthGuard('jwt'))
+    async getPaywallConfig() {
+        return this.subscriptionService.getPaywallConfig();
     }
 
     /**
@@ -478,6 +467,48 @@ export class SubscriptionController {
             page: parsedPage,
             limit: parsedLimit,
         };
+    }
+
+    /**
+     * Admin: Get paywall & plans configuration
+     */
+    @Get('admin/paywall-config')
+    @UseGuards(AuthGuard('jwt'), AdminGuard)
+    async getAdminPaywallConfig() {
+        const [config, summary] = await Promise.all([
+            this.subscriptionService.getPaywallConfig(),
+            this.subscriptionService.getAdminSubscriptionOverview(),
+        ]);
+        return { config, summary };
+    }
+
+    /**
+     * Admin: Update paywall & plans configuration
+     */
+    @Put('admin/paywall-config')
+    @UseGuards(AuthGuard('jwt'), AdminGuard)
+    async updateAdminPaywallConfig(@Body() body: any) {
+        const config = await this.subscriptionService.updatePaywallConfig(body);
+        return { success: true, config };
+    }
+
+    /**
+     * Admin: Reset paywall & plans configuration to defaults
+     */
+    @Post('admin/paywall-config/reset')
+    @UseGuards(AuthGuard('jwt'), AdminGuard)
+    async resetAdminPaywallConfig() {
+        const config = await this.subscriptionService.resetPaywallConfig();
+        return { success: true, config };
+    }
+
+    /**
+     * Admin: Update a user's subscription
+     */
+    @Patch('admin/:id')
+    @UseGuards(AuthGuard('jwt'), AdminGuard)
+    async updateAdminSubscription(@Param('id') id: string, @Body() body: any) {
+        return this.subscriptionService.adminUpdateUserSubscription(id, body);
     }
 
     /**

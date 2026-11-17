@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { View, Text, Button, Alert } from 'react-native';
+import { View, Text, Button, Alert, TextInput, AppState, type AppStateStatus } from 'react-native';
 import { usePremium, useQuota } from '../usePremium';
 import { FEATURES } from '@/types/subscription';
 
@@ -76,6 +76,7 @@ export function FeatureGateExample() {
  * Example 3: Quota management in chat
  */
 export function ChatQuotaExample() {
+    const router = useRouter();
     const { checkQuota, incrementQuota } = usePremium();
     const { quota, isLow, isDepleted } = useQuota();
     const [message, setMessage] = React.useState('');
@@ -219,7 +220,7 @@ export function RefetchOnFocusExample() {
     const { refetch } = usePremium();
 
     React.useEffect(() => {
-        const subscription = AppState.addEventListener('change', (nextAppState) => {
+        const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
             if (nextAppState === 'active') {
                 // Refetch subscription when app comes to foreground
                 refetch();

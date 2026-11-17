@@ -1,9 +1,20 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import {
+    View,
+    Text,
+    StyleSheet,
+    ScrollView,
+    TouchableOpacity,
+    ActivityIndicator,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { ZODIAC_SIGNS, ZodiacSign } from '@/utils/astrology';
+import { astrologyApi } from '@/services/astrologyApi';
 
 type Period = 'daily' | 'weekly' | 'monthly';
 
@@ -13,128 +24,225 @@ export default function ZodiacDetailScreen() {
     const { sign } = useLocalSearchParams<{ sign: string }>();
     const [selectedPeriod, setSelectedPeriod] = useState<Period>('daily');
 
-    const zodiacSign = sign as ZodiacSign;
+    const zodiacSign = (sign || 'aries').toLowerCase() as ZodiacSign;
     const zodiacInfo = ZODIAC_SIGNS[zodiacSign];
+
+    const { data: signData, isLoading } = useQuery({
+        queryKey: ['astrology', 'sign', zodiacSign],
+        queryFn: () => astrologyApi.getSignHoroscopes(zodiacSign),
+        enabled: !!zodiacInfo,
+        staleTime: 5 * 60 * 1000,
+    });
 
     if (!zodiacInfo) {
         return null;
     }
 
+    const activeEntry = signData?.[selectedPeriod];
     const styles = createStyles(theme, zodiacInfo.color);
 
-    const horoscopes = {
-        daily: 'Bugün enerjiniz yüksek! Yeni fırsatlar kapınızı çalabilir. Sevdiklerinizle kaliteli zaman geçirmeye özen gösterin. Finansal konularda dikkatli olun.',
-        weekly: 'Bu hafta kariyerinizde önemli gelişmeler yaşanabilir. Pazartesi ve Salı günleri özellikle verimli geçecek. Hafta sonu kendinize zaman ayırın ve dinlenin.',
-        monthly: 'Bu ay sizin için dönüşüm ayı olacak. Yeni projeler başlatmak için ideal bir dönem. Ay ortasında önemli bir karar vermeniz gerekebilir. Sağlığınıza dikkat edin.',
-    };
+    const elementLabel =
+        zodiacInfo.element === 'fire'
+            ? 'Ateş Elementi'
+            : zodiacInfo.element === 'earth'
+              ? 'Toprak Elementi'
+              : zodiacInfo.element === 'air'
+                ? 'Hava Elementi'
+                : 'Su Elementi';
+
+    const renderScoreBar = (label: string, score: number, icon: keyof typeof Ionicons.glyphMap, color: string) => (
+        <View style={styles.metricRow}>
+            <View style={styles.metricLabelGroup}>
+                <Ionicons name={icon} size={15} color={color} />
+                <Text style={styles.metricLabel}>{label}</Text>
+            </View>
+            <View style={styles.metricBarTrack}>
+                <View style={[styles.metricBarFill, { width: `${(score / 5) * 100}%`, backgroundColor: color }]} />
+            </View>
+            <Text style={styles.metricValue}>{score}/5</Text>
+        </View>
+    );
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top']}>
-            <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+            <ScrollView
+                style={styles.container}
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
+            >
                 {/* Header */}
                 <View style={styles.header}>
                     <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                        <Text style={styles.backIcon}>←</Text>
+                        <Ionicons name="chevron-back" size={20} color={theme.colors.text} />
                     </TouchableOpacity>
                     <Text style={styles.title}>{zodiacInfo.nameTr}</Text>
-                    <View style={styles.headerSpacer} />
+                    <TouchableOpacity
+                        style={styles.compatShortcut}
+                        onPress={() => router.push('/astrology/compatibility')}
+                    >
+                        <Ionicons name="heart-outline" size={18} color={theme.colors.primary} />
+                    </TouchableOpacity>
                 </View>
 
-                {/* Zodiac Header Card */}
-                <View style={styles.zodiacHeader}>
-                    <Text style={styles.zodiacEmoji}>{zodiacInfo.emoji}</Text>
+                {/* Celestial Gradient Header Card */}
+                <LinearGradient
+                    colors={theme.isDark ? ['#312E81', '#6B21A8'] : [zodiacInfo.color, '#7C3AED']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.heroCard}
+                >
+                    <View style={styles.emblemCircle}>
+                        <Text style={styles.zodiacEmoji}>{zodiacInfo.emoji}</Text>
+                    </View>
                     <Text style={styles.zodiacName}>{zodiacInfo.nameTr}</Text>
                     <Text style={styles.zodiacDates}>{zodiacInfo.dates}</Text>
-                    <View style={styles.elementBadge}>
-                        <Text style={styles.elementText}>
-                            {zodiacInfo.element === 'fire' && '🔥 Ateş'}
-                            {zodiacInfo.element === 'earth' && '🌍 Toprak'}
-                            {zodiacInfo.element === 'air' && '💨 Hava'}
-                            {zodiacInfo.element === 'water' && '🌊 Su'}
-                        </Text>
-                    </View>
-                </View>
-
-                {/* Period Selector */}
-                <View style={styles.periodSelector}>
-                    <TouchableOpacity
-                        style={[styles.periodButton, selectedPeriod === 'daily' && styles.periodButtonActive]}
-                        onPress={() => setSelectedPeriod('daily')}
-                    >
-                        <Text style={[styles.periodButtonText, selectedPeriod === 'daily' && styles.periodButtonTextActive]}>
-                            Günlük
-                        </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.periodButton, selectedPeriod === 'weekly' && styles.periodButtonActive]}
-                        onPress={() => setSelectedPeriod('weekly')}
-                    >
-                        <Text style={[styles.periodButtonText, selectedPeriod === 'weekly' && styles.periodButtonTextActive]}>
-                            Haftalık
-                        </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.periodButton, selectedPeriod === 'monthly' && styles.periodButtonActive]}
-                        onPress={() => setSelectedPeriod('monthly')}
-                    >
-                        <Text style={[styles.periodButtonText, selectedPeriod === 'monthly' && styles.periodButtonTextActive]}>
-                            Aylık
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-
-                {/* Horoscope Content */}
-                <View style={styles.horoscopeCard}>
-                    <Text style={styles.horoscopeTitle}>
-                        {selectedPeriod === 'daily' && 'Günlük Yorum'}
-                        {selectedPeriod === 'weekly' && 'Haftalık Yorum'}
-                        {selectedPeriod === 'monthly' && 'Aylık Yorum'}
-                    </Text>
-                    <Text style={styles.horoscopeText}>{horoscopes[selectedPeriod]}</Text>
-                </View>
-
-                {/* Characteristics */}
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Genel Özellikler</Text>
-                    <View style={styles.characteristicsCard}>
-                        <View style={styles.characteristicRow}>
-                            <Text style={styles.characteristicLabel}>💪 Güçlü Yönler</Text>
-                            <Text style={styles.characteristicValue}>
-                                {zodiacSign === 'aries' && 'Cesur, enerjik, lider'}
-                                {zodiacSign === 'taurus' && 'Güvenilir, sabırlı, pratik'}
-                                {zodiacSign === 'gemini' && 'Zeki, iletişim yeteneği, uyumlu'}
-                                {zodiacSign === 'cancer' && 'Duygusal, koruyucu, sadık'}
-                                {zodiacSign === 'leo' && 'Özgüvenli, cömert, yaratıcı'}
-                                {zodiacSign === 'virgo' && 'Detaycı, analitik, yardımsever'}
-                                {zodiacSign === 'libra' && 'Dengeli, diplomatik, adil'}
-                                {zodiacSign === 'scorpio' && 'Tutkulu, kararlı, derin'}
-                                {zodiacSign === 'sagittarius' && 'İyimser, özgür, maceracı'}
-                                {zodiacSign === 'capricorn' && 'Disiplinli, sorumlu, hırslı'}
-                                {zodiacSign === 'aquarius' && 'Özgün, vizyoner, insancıl'}
-                                {zodiacSign === 'pisces' && 'Empatik, yaratıcı, sezgisel'}
-                            </Text>
+                    <View style={styles.metaPillsRow}>
+                        <View style={styles.metaPill}>
+                            <Text style={styles.metaPillText}>{elementLabel}</Text>
                         </View>
-                        <View style={styles.characteristicRow}>
-                            <Text style={styles.characteristicLabel}>🎯 Gelişim Alanları</Text>
-                            <Text style={styles.characteristicValue}>
-                                {zodiacSign === 'aries' && 'Sabır, empati'}
-                                {zodiacSign === 'taurus' && 'Esneklik, değişime açıklık'}
-                                {zodiacSign === 'gemini' && 'Odaklanma, derinlik'}
-                                {zodiacSign === 'cancer' && 'Sınır koyma, bağımsızlık'}
-                                {zodiacSign === 'leo' && 'Alçakgönüllülük, dinleme'}
-                                {zodiacSign === 'virgo' && 'Mükemmeliyetçilik, eleştiri'}
-                                {zodiacSign === 'libra' && 'Kararlılık, kendi ihtiyaçları'}
-                                {zodiacSign === 'scorpio' && 'Güven, bağışlama'}
-                                {zodiacSign === 'sagittarius' && 'Sorumluluk, detay'}
-                                {zodiacSign === 'capricorn' && 'Esneklik, duygusallık'}
-                                {zodiacSign === 'aquarius' && 'Duygusal bağ, yakınlık'}
-                                {zodiacSign === 'pisces' && 'Sınır koyma, gerçekçilik'}
-                            </Text>
+                        <View style={styles.metaPill}>
+                            <Text style={styles.metaPillText}>Yönetici: {zodiacInfo.rulingPlanet}</Text>
                         </View>
                     </View>
+                </LinearGradient>
+
+                {/* Period Segmented Switch */}
+                <View style={styles.periodSegmented}>
+                    {(['daily', 'weekly', 'monthly'] as const).map((period) => {
+                        const active = selectedPeriod === period;
+                        const label =
+                            period === 'daily' ? 'Günlük' : period === 'weekly' ? 'Haftalık' : 'Aylık';
+                        return (
+                            <TouchableOpacity
+                                key={period}
+                                style={[styles.periodButton, active && styles.periodButtonActive]}
+                                onPress={() => setSelectedPeriod(period)}
+                                activeOpacity={0.8}
+                            >
+                                <Text
+                                    style={[
+                                        styles.periodButtonText,
+                                        active && styles.periodButtonTextActive,
+                                    ]}
+                                >
+                                    {label}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
                 </View>
 
-                <View style={styles.bottomSpacer} />
+                {isLoading ? (
+                    <View style={styles.loaderBox}>
+                        <ActivityIndicator size="small" color={theme.colors.primary} />
+                    </View>
+                ) : (
+                    <>
+                        {/* Main Horoscope Card */}
+                        <View style={styles.card}>
+                            {activeEntry?.title && (
+                                <Text style={styles.horoscopeTitle}>{activeEntry.title}</Text>
+                            )}
+                            <Text style={styles.horoscopeText}>
+                                {activeEntry?.summary ||
+                                    'Bu dönem için iç sesinize güvenmek ve kendi ritminize özen göstermek öne çıkıyor.'}
+                            </Text>
+
+                            {activeEntry?.affirmation && (
+                                <View style={styles.affirmationBox}>
+                                    <Ionicons name="sparkles" size={14} color={theme.colors.primary} />
+                                    <Text style={styles.affirmationText}>
+                                        “{activeEntry.affirmation}”
+                                    </Text>
+                                </View>
+                            )}
+                        </View>
+
+                        {/* Scores & Life Areas */}
+                        <View style={styles.card}>
+                            <Text style={styles.cardTitle}>Yaşam Alanları ve Puanlar</Text>
+                            <View style={styles.metricsStack}>
+                                {renderScoreBar('Aşk', activeEntry?.loveScore ?? 4, 'heart', '#EC4899')}
+                                {renderScoreBar('Kariyer', activeEntry?.careerScore ?? 4, 'briefcase', '#3B82F6')}
+                                {renderScoreBar('Sağlık', activeEntry?.healthScore ?? 4, 'fitness', '#10B981')}
+                            </View>
+
+                            {activeEntry?.loveText && (
+                                <View style={styles.areaBlock}>
+                                    <Text style={styles.areaTitle}>💕 Aşk & İlişkiler</Text>
+                                    <Text style={styles.areaBody}>{activeEntry.loveText}</Text>
+                                </View>
+                            )}
+                            {activeEntry?.careerText && (
+                                <View style={styles.areaBlock}>
+                                    <Text style={styles.areaTitle}>💼 Kariyer & Odak</Text>
+                                    <Text style={styles.areaBody}>{activeEntry.careerText}</Text>
+                                </View>
+                            )}
+                            {activeEntry?.healthText && (
+                                <View style={styles.areaBlock}>
+                                    <Text style={styles.areaTitle}>🌿 Sağlık & Beden</Text>
+                                    <Text style={styles.areaBody}>{activeEntry.healthText}</Text>
+                                </View>
+                            )}
+                        </View>
+
+                        {/* Lucky Guide */}
+                        <View style={styles.card}>
+                            <Text style={styles.cardTitle}>Şans Rehberi</Text>
+                            <View style={styles.luckyGrid}>
+                                <View style={styles.luckyTile}>
+                                    <Text style={styles.luckyLabel}>Şanslı Sayı</Text>
+                                    <Text style={styles.luckyValue}>{activeEntry?.luckyNumber ?? 7}</Text>
+                                </View>
+                                <View style={styles.luckyTile}>
+                                    <Text style={styles.luckyLabel}>Renk</Text>
+                                    <Text style={styles.luckyValue} numberOfLines={1}>
+                                        {activeEntry?.luckyColor ?? 'Gül Kurusu'}
+                                    </Text>
+                                </View>
+                                <View style={styles.luckyTile}>
+                                    <Text style={styles.luckyLabel}>Doğal Taş</Text>
+                                    <Text style={styles.luckyValue} numberOfLines={1}>
+                                        {activeEntry?.luckyStone ?? 'Ay Taşı'}
+                                    </Text>
+                                </View>
+                            </View>
+                        </View>
+                    </>
+                )}
+
+                {/* Characteristics & Compatible Signs */}
+                <View style={styles.card}>
+                    <Text style={styles.cardTitle}>Burç Profili</Text>
+                    <View style={styles.areaBlock}>
+                        <Text style={styles.areaTitle}>Güçlü Yönler</Text>
+                        <Text style={styles.areaBody}>{zodiacInfo.strengths}</Text>
+                    </View>
+                    <View style={styles.areaBlock}>
+                        <Text style={styles.areaTitle}>Gelişim Alanları</Text>
+                        <Text style={styles.areaBody}>{zodiacInfo.growthAreas}</Text>
+                    </View>
+                    <View style={styles.areaBlock}>
+                        <Text style={styles.areaTitle}>Uyumlu Burçlar</Text>
+                        <View style={styles.compatibleRow}>
+                            {zodiacInfo.compatibleSigns.map((comp) => {
+                                const cInfo = ZODIAC_SIGNS[comp];
+                                return (
+                                    <TouchableOpacity
+                                        key={comp}
+                                        style={styles.compatibleChip}
+                                        onPress={() => router.replace(`/astrology/${comp}`)}
+                                    >
+                                        <Text style={styles.compatibleChipText}>
+                                            {cInfo.emoji} {cInfo.nameTr}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
+                    </View>
+                </View>
             </ScrollView>
         </SafeAreaView>
     );
@@ -149,145 +257,247 @@ const createStyles = (theme: ReturnType<typeof useTheme>, accentColor: string) =
         container: {
             flex: 1,
         },
+        scrollContent: {
+            paddingHorizontal: 16,
+            paddingBottom: 40,
+            gap: 14,
+        },
         header: {
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'space-between',
-            paddingHorizontal: theme.spacing.lg,
-            paddingVertical: theme.spacing.md,
+            paddingTop: 6,
         },
         backButton: {
-            width: 40,
-            height: 40,
+            width: 38,
+            height: 38,
+            borderRadius: 19,
+            backgroundColor: theme.colors.backgroundCard,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
             justifyContent: 'center',
             alignItems: 'center',
         },
-        backIcon: {
-            fontSize: 24,
-            color: theme.colors.text,
-        },
         title: {
             fontSize: 20,
-            fontWeight: '700',
+            fontWeight: '800',
             color: theme.colors.text,
         },
-        headerSpacer: {
-            width: 40,
-        },
-        zodiacHeader: {
-            marginHorizontal: theme.spacing.lg,
-            marginBottom: theme.spacing.lg,
-            backgroundColor: accentColor + '20',
-            borderRadius: 20,
-            padding: theme.spacing.xl,
+        compatShortcut: {
+            width: 38,
+            height: 38,
+            borderRadius: 19,
+            backgroundColor: theme.colors.backgroundCard,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            justifyContent: 'center',
             alignItems: 'center',
-            borderWidth: 2,
-            borderColor: accentColor + '40',
+        },
+        heroCard: {
+            borderRadius: 24,
+            padding: 22,
+            alignItems: 'center',
+            gap: 6,
+        },
+        emblemCircle: {
+            width: 68,
+            height: 68,
+            borderRadius: 34,
+            backgroundColor: 'rgba(255,255,255,0.22)',
+            justifyContent: 'center',
+            alignItems: 'center',
+            marginBottom: 4,
         },
         zodiacEmoji: {
-            fontSize: 72,
-            marginBottom: theme.spacing.md,
+            fontSize: 36,
         },
         zodiacName: {
-            fontSize: 28,
-            fontWeight: '700',
-            color: theme.colors.text,
-            marginBottom: theme.spacing.xs,
+            fontSize: 26,
+            fontWeight: '800',
+            color: '#FFFFFF',
         },
         zodiacDates: {
-            fontSize: 16,
-            color: theme.colors.textSecondary,
-            marginBottom: theme.spacing.md,
+            fontSize: 13,
+            color: 'rgba(255,255,255,0.88)',
         },
-        elementBadge: {
-            backgroundColor: accentColor + '30',
-            paddingHorizontal: theme.spacing.md,
-            paddingVertical: theme.spacing.xs,
-            borderRadius: 20,
-        },
-        elementText: {
-            fontSize: 14,
-            fontWeight: '600',
-            color: theme.colors.text,
-        },
-        periodSelector: {
+        metaPillsRow: {
             flexDirection: 'row',
-            marginHorizontal: theme.spacing.lg,
-            marginBottom: theme.spacing.lg,
-            backgroundColor: theme.colors.backgroundCard,
+            gap: 8,
+            marginTop: 6,
+        },
+        metaPill: {
+            backgroundColor: 'rgba(255,255,255,0.18)',
+            paddingHorizontal: 12,
+            paddingVertical: 5,
             borderRadius: 12,
+        },
+        metaPillText: {
+            fontSize: 12,
+            fontWeight: '700',
+            color: '#FFFFFF',
+        },
+        periodSegmented: {
+            flexDirection: 'row',
+            backgroundColor: theme.colors.backgroundCard,
+            borderRadius: 16,
             padding: 4,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            gap: 4,
         },
         periodButton: {
             flex: 1,
-            paddingVertical: theme.spacing.sm,
-            borderRadius: 8,
+            paddingVertical: 9,
+            borderRadius: 12,
             alignItems: 'center',
         },
         periodButtonActive: {
             backgroundColor: accentColor,
         },
         periodButtonText: {
-            fontSize: 14,
-            fontWeight: '600',
+            fontSize: 13.5,
+            fontWeight: '700',
             color: theme.colors.textSecondary,
         },
         periodButtonTextActive: {
             color: '#FFFFFF',
         },
-        horoscopeCard: {
-            marginHorizontal: theme.spacing.lg,
-            marginBottom: theme.spacing.lg,
+        loaderBox: {
+            paddingVertical: 32,
+            alignItems: 'center',
+        },
+        card: {
             backgroundColor: theme.colors.backgroundCard,
-            borderRadius: 16,
-            padding: theme.spacing.lg,
+            borderRadius: 20,
+            padding: 16,
             borderWidth: 1,
             borderColor: theme.colors.border,
+            gap: 12,
+        },
+        cardTitle: {
+            fontSize: 16,
+            fontWeight: '800',
+            color: theme.colors.text,
         },
         horoscopeTitle: {
-            fontSize: 18,
-            fontWeight: '700',
+            fontSize: 17,
+            fontWeight: '800',
             color: theme.colors.text,
-            marginBottom: theme.spacing.md,
         },
         horoscopeText: {
-            fontSize: 15,
-            lineHeight: 24,
+            fontSize: 14.5,
+            color: theme.colors.textSecondary,
+            lineHeight: 22,
+        },
+        affirmationBox: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            backgroundColor: theme.colors.backgroundSecondary,
+            borderRadius: 12,
+            padding: 12,
+        },
+        affirmationText: {
+            flex: 1,
+            fontSize: 13,
+            fontStyle: 'italic',
             color: theme.colors.text,
+            lineHeight: 19,
         },
-        section: {
-            marginBottom: theme.spacing.xl,
+        metricsStack: {
+            gap: 10,
         },
-        sectionTitle: {
-            fontSize: 20,
-            fontWeight: '700',
-            color: theme.colors.text,
-            paddingHorizontal: theme.spacing.lg,
-            marginBottom: theme.spacing.md,
+        metricRow: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
         },
-        characteristicsCard: {
-            marginHorizontal: theme.spacing.lg,
-            backgroundColor: theme.colors.backgroundCard,
-            borderRadius: 16,
-            padding: theme.spacing.lg,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
+        metricLabelGroup: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            width: 82,
         },
-        characteristicRow: {
-            marginBottom: theme.spacing.md,
-        },
-        characteristicLabel: {
-            fontSize: 14,
+        metricLabel: {
+            fontSize: 13,
             fontWeight: '600',
             color: theme.colors.text,
-            marginBottom: theme.spacing.xs,
         },
-        characteristicValue: {
-            fontSize: 14,
-            lineHeight: 20,
+        metricBarTrack: {
+            flex: 1,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: theme.colors.background,
+            overflow: 'hidden',
+        },
+        metricBarFill: {
+            height: '100%',
+            borderRadius: 4,
+        },
+        metricValue: {
+            width: 30,
+            textAlign: 'right',
+            fontSize: 12.5,
+            fontWeight: '700',
             color: theme.colors.textSecondary,
         },
-        bottomSpacer: {
-            height: 40,
+        areaBlock: {
+            paddingTop: 10,
+            borderTopWidth: 1,
+            borderTopColor: theme.colors.border,
+            gap: 4,
+        },
+        areaTitle: {
+            fontSize: 13.5,
+            fontWeight: '700',
+            color: theme.colors.text,
+        },
+        areaBody: {
+            fontSize: 13.5,
+            color: theme.colors.textSecondary,
+            lineHeight: 20,
+        },
+        luckyGrid: {
+            flexDirection: 'row',
+            gap: 8,
+        },
+        luckyTile: {
+            flex: 1,
+            backgroundColor: theme.colors.background,
+            borderRadius: 14,
+            padding: 11,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            alignItems: 'center',
+            gap: 4,
+        },
+        luckyLabel: {
+            fontSize: 11,
+            color: theme.colors.textLight,
+            fontWeight: '600',
+        },
+        luckyValue: {
+            fontSize: 13,
+            fontWeight: '800',
+            color: theme.colors.text,
+        },
+        compatibleRow: {
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: 8,
+            marginTop: 4,
+        },
+        compatibleChip: {
+            backgroundColor: theme.colors.background,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            paddingHorizontal: 11,
+            paddingVertical: 6,
+            borderRadius: 14,
+        },
+        compatibleChipText: {
+            fontSize: 12.5,
+            fontWeight: '600',
+            color: theme.colors.text,
         },
     });

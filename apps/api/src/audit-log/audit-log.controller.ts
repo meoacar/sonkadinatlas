@@ -1,9 +1,10 @@
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { AuditLogService } from './audit-log.service';
+import { AdminGuard } from '../common/guards/admin.guard';
 
 @Controller('audit-logs')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), AdminGuard)
 export class AuditLogController {
   constructor(private readonly auditLogService: AuditLogService) {}
 
@@ -14,6 +15,7 @@ export class AuditLogController {
     @Query('userId') userId?: string,
     @Query('action') action?: string,
     @Query('entity') entity?: string,
+    @Query('search') search?: string,
     @Query('sortBy') sortBy?: string,
     @Query('sortOrder') sortOrder?: string,
   ) {
@@ -23,6 +25,7 @@ export class AuditLogController {
       userId,
       action,
       entity,
+      search,
       sortBy,
       sortOrder,
     });

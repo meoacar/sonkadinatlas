@@ -112,11 +112,19 @@ export class GamificationService {
     }
 
     // Increment data entry count
-    async incrementDataEntry(userId: string) {
+    async incrementDataEntry(
+        userId: string,
+        options?: { wellness?: boolean; symptomsCount?: number },
+    ) {
+        await this.getUserGamification(userId);
         await this.prisma.userGamification.update({
             where: { userId },
             data: {
                 totalDataEntries: { increment: 1 },
+                ...(options?.wellness ? { totalWellnessLogs: { increment: 1 } } : {}),
+                ...(options?.symptomsCount && options.symptomsCount > 0
+                    ? { totalSymptoms: { increment: options.symptomsCount } }
+                    : {}),
             },
         });
 
@@ -127,28 +135,274 @@ export class GamificationService {
         return this.addXp(userId, 5); // 5 XP per data entry
     }
 
+    private getTodayUtcRange() {
+        const now = new Date();
+        const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+        const end = new Date(start);
+        end.setUTCDate(end.getUTCDate() + 1);
+        const dateKey = start.toISOString().split('T')[0];
+        return { start, end, dateKey };
+    }
+
+    // Get today's 3 mini tasks & check-in state
+    async getDailyTasks(userId: string) {
+        const { start, end, dateKey } = this.getTodayUtcRange();
+        const localStart = new Date();
+        localStart.setHours(0, 0, 0, 0);
+        const localEnd = new Date(localStart);
+        localEnd.setDate(localEnd.getDate() + 1);
+
+        const gamification = await this.getUserGamification(userId);
+
+        const [todayLog, waterLogs, stepsRecord, meditationCount, sleepRecord] = await Promise.all([
+            this.prisma.dailyLog.findUnique({
+                where: { userId_date: { userId, date: start } },
+            }),
+            this.prisma.waterLog.findMany({
+                where: { userId, loggedAt: { gte: localStart, lt: localEnd } },
+            }),
+            this.prisma.dailySteps.findUnique({
+                where: { userId_date: { userId, date: start } },
+            }),
+            this.prisma.meditationSession.count({
+                where: { userId, date: { gte: start, lt: end } },
+            }),
+            this.prisma.sleepLog.findFirst({
+                where: { userId, sleepDate: { gte: new Date(start.getTime() - 24 * 60 * 60 * 1000), lt: end } },
+            }),
+        ]);
+
+        const storedChallenge = (gamification.dailyChallengeJson as any) || {};
+        const isSameChallengeDay = storedChallenge.dateKey === dateKey;
+        const awardedTaskIds: string[] = isSameChallengeDay && Array.isArray(storedChallenge.awardedTaskIds)
+            ? [...storedChallenge.awardedTaskIds]
+            : [];
+        let bonusAwarded = isSameChallengeDay ? Boolean(storedChallenge.bonusAwarded) : false;
+
+        const waterTotalMl = waterLogs.reduce((sum, l) => sum + l.amountMl, 0);
+        const hasCheckin = Boolean(
+            todayLog &&
+            ((todayLog.mood && todayLog.mood.length > 0) ||
+                (todayLog.symptoms && todayLog.symptoms.length > 0) ||
+                todayLog.healthNotes),
+        );
+        const hasWellness =
+            (stepsRecord?.count ?? 0) > 0 || meditationCount > 0 || Boolean(sleepRecord);
+
+        const tasks = [
+            {
+                id: 'checkin',
+                title: '5 Saniyelik Check-in',
+                description: 'Bugünkü ruh halini ve belirtilerini kaydet',
+                xp: 15,
+                completed: hasCheckin,
+                actionRoute: '/(tabs)/home',
+            },
+            {
+                id: 'water',
+                title: 'En Az 1 Litre Su',
+                description: `Bugün ${waterTotalMl} / 1000 ml içildi`,
+                xp: 10,
+                completed: waterTotalMl >= 1000,
+                actionRoute: '/water',
+            },
+            {
+                id: 'wellness',
+                title: 'Beden & Zihin Bakımı',
+                description: 'Adım, uyku veya 4-7-8 nefes egzersizi kaydet',
+                xp: 15,
+                completed: hasWellness,
+                actionRoute: '/wellness/meditation',
+            },
+        ];
+
+        let xpAwardedNow = 0;
+        for (const task of tasks) {
+            if (task.completed && !awardedTaskIds.includes(task.id)) {
+                awardedTaskIds.push(task.id);
+                xpAwardedNow += task.xp;
+            }
+        }
+
+        const allCompleted = tasks.every((t) => t.completed);
+        if (allCompleted && !bonusAwarded) {
+            bonusAwarded = true;
+            xpAwardedNow += 20;
+        }
+
+        if (xpAwardedNow > 0 || !isSameChallengeDay) {
+            await this.prisma.userGamification.update({
+                where: { userId },
+                data: {
+                    dailyChallengeDate: start,
+                    dailyChallengeJson: {
+                        dateKey,
+                        awardedTaskIds,
+                        bonusAwarded,
+                        checkinMeta: isSameChallengeDay ? storedChallenge.checkinMeta || null : null,
+                    } as any,
+                },
+            });
+            if (xpAwardedNow > 0) {
+                await this.updateStreak(userId);
+                await this.addXp(userId, xpAwardedNow);
+            }
+        }
+
+        const latestStored = isSameChallengeDay ? storedChallenge : {};
+        return {
+            dateKey,
+            completedCount: tasks.filter((t) => t.completed).length,
+            totalCount: tasks.length,
+            allCompleted,
+            bonusXp: 20,
+            bonusAwarded,
+            tasks,
+            todayCheckin: todayLog
+                ? {
+                    mood: todayLog.mood?.[0] || null,
+                    symptoms: todayLog.symptoms || [],
+                    note: todayLog.healthNotes || null,
+                    energy: latestStored?.checkinMeta?.energy ?? null,
+                }
+                : null,
+        };
+    }
+
+    // Submit quick daily check-in from Home screen
+    async submitDailyCheckin(
+        userId: string,
+        body: {
+            mood?: string;
+            energy?: number;
+            symptoms?: string[];
+            water250?: boolean;
+            note?: string;
+        },
+    ) {
+        const { start, dateKey } = this.getTodayUtcRange();
+        const existing = await this.prisma.dailyLog.findUnique({
+            where: { userId_date: { userId, date: start } },
+        });
+
+        const moodArr = body.mood ? [body.mood] : existing?.mood || [];
+        const symptomsArr = Array.isArray(body.symptoms) ? body.symptoms : existing?.symptoms || [];
+        const healthNotes = body.note !== undefined ? body.note : existing?.healthNotes;
+
+        await this.prisma.dailyLog.upsert({
+            where: { userId_date: { userId, date: start } },
+            create: {
+                userId,
+                date: start,
+                mood: moodArr,
+                symptoms: symptomsArr,
+                healthNotes: healthNotes || undefined,
+            },
+            update: {
+                mood: moodArr,
+                symptoms: symptomsArr,
+                healthNotes: healthNotes || undefined,
+            },
+        });
+
+        if (body.water250) {
+            await this.prisma.waterLog.create({
+                data: {
+                    userId,
+                    amountMl: 250,
+                    loggedAt: new Date(),
+                },
+            });
+        }
+
+        const gamification = await this.getUserGamification(userId);
+        const prevChallenge = (gamification.dailyChallengeJson as any) || {};
+        const prevMeta = prevChallenge.dateKey === dateKey ? prevChallenge : { dateKey, awardedTaskIds: [], bonusAwarded: false };
+
+        await this.prisma.userGamification.update({
+            where: { userId },
+            data: {
+                dailyChallengeDate: start,
+                dailyChallengeJson: {
+                    ...prevMeta,
+                    dateKey,
+                    checkinMeta: {
+                        energy: body.energy ?? prevMeta?.checkinMeta?.energy ?? 3,
+                        updatedAt: new Date().toISOString(),
+                    },
+                } as any,
+            },
+        });
+
+        if (!existing) {
+            await this.incrementDataEntry(userId, {
+                wellness: Boolean(body.water250),
+                symptomsCount: symptomsArr.length,
+            });
+        } else {
+            await this.updateStreak(userId);
+        }
+
+        const summary = await this.getDailyTasks(userId);
+        const stats = await this.getUserStats(userId);
+
+        return {
+            ...summary,
+            streak: stats.currentStreak,
+            level: stats.level,
+            totalXp: stats.totalXp,
+        };
+    }
+
     // Get user stats
     async getUserStats(userId: string) {
         const gamification = await this.getUserGamification(userId);
-        const achievements = await this.prisma.userAchievement.findMany({
-            where: { userId, isCompleted: true },
-            include: { achievement: true },
-            orderBy: { completedAt: 'desc' },
-        });
+        const [
+            achievements,
+            totalBadges,
+            unreadInsights,
+            dailyLogsCount,
+            waterLogsCount,
+            cyclesCount,
+        ] = await Promise.all([
+            this.prisma.userAchievement.findMany({
+                where: { userId, isCompleted: true },
+                include: { achievement: true },
+                orderBy: { completedAt: 'desc' },
+            }),
+            this.prisma.achievement.count({ where: { isActive: true } }),
+            this.prisma.userInsight.count({
+                where: {
+                    userId,
+                    isRead: false,
+                    OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }],
+                },
+            }),
+            this.prisma.dailyLog.count({ where: { userId } }),
+            this.prisma.waterLog.count({ where: { userId } }),
+            this.prisma.periodCycle.count({ where: { userId } }),
+        ]);
 
         const xpForNextLevel = this.getXpForLevel(gamification.level + 1);
         const xpForCurrentLevel = this.getXpForLevel(gamification.level);
-        const xpNeeded = xpForNextLevel - gamification.totalXp;
-        const xpProgress = gamification.totalXp - xpForCurrentLevel;
-        const xpTotal = xpForNextLevel - xpForCurrentLevel;
+        const xpNeeded = Math.max(0, xpForNextLevel - gamification.totalXp);
+        const xpProgress = Math.max(0, gamification.totalXp - xpForCurrentLevel);
+        const xpTotal = Math.max(1, xpForNextLevel - xpForCurrentLevel);
 
         return {
             ...gamification,
+            totalDataEntries: Math.max(
+                gamification.totalDataEntries,
+                dailyLogsCount + waterLogsCount + cyclesCount,
+            ),
+            totalWellnessLogs: Math.max(gamification.totalWellnessLogs, waterLogsCount),
             achievements: achievements.length,
+            totalBadges,
+            unreadInsights,
             xpNeeded,
             xpProgress,
             xpTotal,
-            levelProgress: (xpProgress / xpTotal) * 100,
+            levelProgress: Math.min(100, (xpProgress / xpTotal) * 100),
         };
     }
 

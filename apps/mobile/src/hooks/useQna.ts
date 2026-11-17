@@ -1,22 +1,23 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery, UseQueryOptions } from '@tanstack/react-query';
 import { qnaService } from '@/services/api';
-import type {
-    Question,
-    Answer,
-    QuestionComment,
-    AnswerComment,
-    CreateQuestionDto,
-    UpdateQuestionDto,
-    CreateAnswerDto,
-    UpdateAnswerDto,
-    CreateCommentDto,
-    VoteDto,
-    ReportContentDto,
-    QuestionFilters,
-    PaginatedQuestions,
-    ReputationDetail,
-    Leaderboard,
-    QnaQuota,
+import {
+    VoteType,
+    type Question,
+    type Answer,
+    type QuestionComment,
+    type AnswerComment,
+    type CreateQuestionDto,
+    type UpdateQuestionDto,
+    type CreateAnswerDto,
+    type UpdateAnswerDto,
+    type CreateCommentDto,
+    type VoteDto,
+    type ReportContentDto,
+    type QuestionFilters,
+    type PaginatedQuestions,
+    type ReputationDetail,
+    type Leaderboard,
+    type QnaQuota,
 } from '@/types/qna';
 
 // Query keys
@@ -387,12 +388,12 @@ export function useVoteAnswer() {
                     return old.map((answer) => {
                         if (answer.id !== answerId) return answer;
 
-                        const currentVote = answer.userVote;
+                        const currentVote = answer.userVote ?? null;
                         const newVote = data.voteType;
                         let voteCountDelta = 0;
 
                         // Calculate vote count change
-                        if (currentVote === null) {
+                        if (!currentVote) {
                             // No previous vote
                             voteCountDelta = newVote === VoteType.UPVOTE ? 1 : -1;
                         } else if (currentVote === newVote) {
@@ -438,9 +439,39 @@ export function useRemoveVote() {
 
     return useMutation({
         mutationFn: (answerId: string) => qnaService.removeVote(answerId),
-        onSuccess: (_, answerId) => {
+        onMutate: async (answerId) => {
+            await queryClient.cancelQueries({ queryKey: ['qna', 'answers'] });
+            const previousAnswers = queryClient.getQueriesData({ queryKey: ['qna', 'answers'] });
+
+            queryClient.setQueriesData<Answer[]>(
+                { queryKey: ['qna', 'answers'] },
+                (old) => {
+                    if (!old) return old;
+                    return old.map((answer) => {
+                        if (answer.id !== answerId || !answer.userVote) return answer;
+                        const voteCountDelta = answer.userVote === VoteType.UPVOTE ? -1 : 1;
+                        return {
+                            ...answer,
+                            userVote: null,
+                            voteCount: answer.voteCount + voteCountDelta,
+                        };
+                    });
+                }
+            );
+
+            return { previousAnswers };
+        },
+        onError: (_err, _answerId, context) => {
+            if (context?.previousAnswers) {
+                context.previousAnswers.forEach(([queryKey, data]) => {
+                    queryClient.setQueryData(queryKey, data);
+                });
+            }
+        },
+        onSettled: (_, __, answerId) => {
             queryClient.invalidateQueries({ queryKey: qnaKeys.userVote(answerId) });
             queryClient.invalidateQueries({ queryKey: ['qna', 'answers'] });
+            queryClient.invalidateQueries({ queryKey: qnaKeys.reputation() });
         },
     });
 }

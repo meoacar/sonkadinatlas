@@ -14,10 +14,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { waterService } from '@/services/api';
+import { waterService, userService } from '@/services/api';
 import { useTheme } from '@/hooks/useTheme';
 
-const DAILY_TARGET_ML = 2000;
+const DEFAULT_TARGET_ML = 2000;
+
+interface WaterTodayData {
+  totalMl: number;
+  targetMl?: number;
+  logs: Array<{ id: string; amountMl: number; loggedAt: string }>;
+}
 
 const QUICK_OPTIONS = [
   { ml: 250, label: '250 ml', subtitle: 'Su Bardağı', icon: '🥛' },
@@ -34,10 +40,20 @@ export default function WaterScreen() {
   const [displayMl, setDisplayMl] = useState(0);
   const [lastAddedMl, setLastAddedMl] = useState<number | null>(null);
 
-  const { data: todayData } = useQuery({
+  const { data: todayData } = useQuery<WaterTodayData>({
     queryKey: ['waterToday'],
-    queryFn: () => waterService.getTodayTotal(),
+    queryFn: () => waterService.getTodayTotal() as Promise<WaterTodayData>,
   });
+
+  const { data: meData } = useQuery<any>({
+    queryKey: ['me'],
+    queryFn: () => userService.getMe(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const weightKg = meData?.profile?.weightKg;
+  const dailyTargetMl =
+    todayData?.targetMl || (weightKg ? Math.round(weightKg * 30) : DEFAULT_TARGET_ML);
 
   // Animated values for water tank, pouring droplets, bubbles, and celebration toast
   const fillLevelAnim = useRef(new Animated.Value(0)).current;
@@ -104,7 +120,7 @@ export default function WaterScreen() {
   useEffect(() => {
     if (todayData?.totalMl !== undefined) {
       setDisplayMl(todayData.totalMl);
-      const pct = Math.min((todayData.totalMl / DAILY_TARGET_ML) * 100, 100);
+      const pct = Math.min((todayData.totalMl / dailyTargetMl) * 100, 100);
       Animated.spring(fillLevelAnim, {
         toValue: pct,
         friction: 7,
@@ -112,11 +128,11 @@ export default function WaterScreen() {
         useNativeDriver: false,
       }).start();
     }
-  }, [todayData?.totalMl]);
+  }, [todayData?.totalMl, dailyTargetMl]);
 
   const playPourAnimation = (addedMl: number, nextTotalMl: number) => {
     setLastAddedMl(addedMl);
-    const nextPct = Math.min((nextTotalMl / DAILY_TARGET_ML) * 100, 100);
+    const nextPct = Math.min((nextTotalMl / dailyTargetMl) * 100, 100);
 
     // Reset pouring drops
     pourStreamOpacity.setValue(1);
@@ -244,7 +260,7 @@ export default function WaterScreen() {
     addWaterMutation.mutate(ml);
   };
 
-  const percentage = Math.min(Math.round((displayMl / DAILY_TARGET_ML) * 100), 100);
+  const percentage = Math.min(Math.round((displayMl / dailyTargetMl) * 100), 100);
   const styles = createStyles(theme);
 
   const animatedFillHeight = fillLevelAnim.interpolate({
@@ -269,7 +285,7 @@ export default function WaterScreen() {
         <View style={styles.headerRow}>
           <View>
             <Text style={styles.title}>Su Takibi 💧</Text>
-            <Text style={styles.subtitle}>Günlük hedef: {DAILY_TARGET_ML} ml</Text>
+            <Text style={styles.subtitle}>Günlük hedef: {dailyTargetMl} ml</Text>
           </View>
           <TouchableOpacity style={styles.closeButton} onPress={() => router.back()}>
             <Text style={styles.closeButtonText}>✕</Text>
@@ -435,7 +451,7 @@ export default function WaterScreen() {
                   percentage > 45 && styles.mlCounterTextOnWater,
                 ]}
               >
-                {displayMl} / {DAILY_TARGET_ML} ml
+                {displayMl} / {dailyTargetMl} ml
               </Text>
               {percentage >= 100 && (
                 <View style={styles.goalBadge}>

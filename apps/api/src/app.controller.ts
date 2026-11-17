@@ -14,4 +14,9 @@ export class AppController {
   async healthCheck() {
     return this.appService.getHealthStatus();
   }
+
+  @Get('public/site-summary')
+  async getPublicSiteSummary() {
+    return this.appService.getPublicSiteSummary();
+  }
 }

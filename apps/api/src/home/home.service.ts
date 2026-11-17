@@ -18,6 +18,15 @@ export interface HomeSnapshot {
   };
   todaySnapshot: {
     cycleDay?: number;
+    cyclePhase?: {
+      phase: 'MENSTRUAL' | 'FOLLICULAR' | 'OVULATION' | 'LUTEAL';
+      title: string;
+      summary: string;
+      nutritionTip: string;
+      exerciseTip: string;
+      novaPrompt: string;
+      color: string;
+    };
     nextPeriodEstimate?: {
       date: Date;
       confidence: 'low' | 'medium' | 'high';
@@ -38,6 +47,7 @@ export interface HomeSnapshot {
       logs: number;
     };
     remindersToday: number;
+    dataEntriesCount: number;
   };
   wellnessTiles?: WellnessSummary;
   priorityCards: PriorityCard[];
@@ -277,19 +287,26 @@ export class HomeService {
     const waterTarget = profile?.weightKg ? Math.round(profile.weightKg * 30) : 2000; // 30ml per kg or default 2L
 
     // Get reminders count for today
-    const remindersToday = await this.prisma.reminder.count({
-      where: {
-        userId,
-        active: true,
-        nextRunAt: {
-          gte: today,
-          lt: tomorrow,
+    const [remindersToday, dailyLogsCount, totalWaterCount] = await Promise.all([
+      this.prisma.reminder.count({
+        where: {
+          userId,
+          active: true,
+          nextRunAt: {
+            gte: today,
+            lt: tomorrow,
+          },
         },
-      },
-    });
+      }),
+      this.prisma.dailyLog.count({ where: { userId } }),
+      this.prisma.waterLog.count({ where: { userId } }),
+    ]);
+
+    const cyclePhase = this.getCyclePhaseGuidance(cycleDay);
 
     return {
       cycleDay,
+      cyclePhase,
       nextPeriodEstimate,
       pregnancy,
       waterProgress: {
@@ -298,6 +315,53 @@ export class HomeService {
         logs: waterToday.logs.length,
       },
       remindersToday,
+      dataEntriesCount: dailyLogsCount + totalWaterCount + (cycles?.length || 0),
+    };
+  }
+
+  private getCyclePhaseGuidance(cycleDay?: number) {
+    if (!cycleDay || cycleDay < 1 || cycleDay > 45) return undefined;
+    if (cycleDay <= 5) {
+      return {
+        phase: 'MENSTRUAL' as const,
+        title: 'Menstrual Faz (Dinlenme & Yenilenme)',
+        summary: `Döngünün ${cycleDay}. günü. Enerji seviyen daha düşük olabilir; bedenine nazik davran.`,
+        nutritionTip: 'Demir ve magnezyum zengini besinler (ıspanak, mercimek, bitter çikolata) ve ılık bitki çayları tercih et.',
+        exerciseTip: 'Hafif yürüyüş, esneme veya kramp rahatlatıcı 4-7-8 nefes egzersizi idealdir.',
+        novaPrompt: `Döngümün ${cycleDay}. günündeyim (Menstrual faz). Kramp ve yorgunluğu azaltacak bugüne özel beslenme ve bakım önerisi ver.`,
+        color: '#EC4899',
+      };
+    }
+    if (cycleDay <= 13) {
+      return {
+        phase: 'FOLLICULAR' as const,
+        title: 'Foliküler Faz (Yükselen Enerji)',
+        summary: `Döngünün ${cycleDay}. günü. Östrojen yükselişiyle odak ve motivasyon artışı başlar.`,
+        nutritionTip: 'Taze yeşillikler, probiyotikler ve dengeli proteinlerle enerjini destekle.',
+        exerciseTip: 'Tempolu yürüyüş, dans, pilates veya yeni hedefler için harika bir dönem.',
+        novaPrompt: `Döngümün ${cycleDay}. günündeyim (Foliküler faz). Yüksek enerjimi verimli kullanmak için bugüne özel egzersiz ve beslenme planı öner.`,
+        color: '#8B5CF6',
+      };
+    }
+    if (cycleDay <= 16) {
+      return {
+        phase: 'OVULATION' as const,
+        title: 'Ovulasyon Fazı (Zirve & İletişim)',
+        summary: `Döngünün ${cycleDay}. günü. Sosyal enerji ve fiziksel canlılık en yüksek noktadadır.`,
+        nutritionTip: 'Antioksidan meyveler, çiğ kuruyemişler ve bol su tüketimini ihmal etme.',
+        exerciseTip: 'Kardiyo, güç antrenmanı veya açık hava aktiviteleri için en uygun zaman.',
+        novaPrompt: `Döngümün ${cycleDay}. günündeyim (Ovulasyon fazı). Bu dönemde su ihtiyacı ve vücut sinyallerim için nelere dikkat etmeliyim?`,
+        color: '#10B981',
+      };
+    }
+    return {
+      phase: 'LUTEAL' as const,
+      title: 'Luteal Faz (Denge & Özen)',
+      summary: `Döngünün ${cycleDay}. günü. Progesteron yükselirken şişkinlik veya tatlı isteği görülebilir.`,
+      nutritionTip: 'Kompleks karbonhidratlar (yulaf, kinoa), B6 vitamini ve tuz dengesine dikkat et.',
+      exerciseTip: 'Orta tempolu pilates, yoga ve akşam uyku hijyenini destekleyen nefes çalışmaları iyi gelir.',
+      novaPrompt: `Döngümün ${cycleDay}. günündeyim (Luteal faz). PMS hassasiyeti ve tatlı isteğini dengelemek için öneriler paylaş.`,
+      color: '#F59E0B',
     };
   }
 

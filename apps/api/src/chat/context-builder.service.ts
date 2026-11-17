@@ -33,6 +33,16 @@ interface UserHealthContext {
         sleep?: { lastNightMin: number; quality?: string };
     };
 
+    // Recent daily logs & symptom summary
+    recentSymptoms?: {
+        loggedDaysCount: number;
+        latestDate?: string;
+        latestFlow?: string;
+        avgCramps?: number;
+        topSymptoms: string[];
+        recentMoods: string[];
+    };
+
     // User preferences
     language: 'tr' | 'en';
     anonymousMode: boolean;
@@ -87,7 +97,7 @@ export class ContextBuilderService {
         // Get current cycle (only if not pregnant)
         if (!pregnancy) {
             const currentCycle = await this.prisma.periodCycle.findFirst({
-                where: { userId, endDate: null },
+                where: { userId },
                 orderBy: { startDate: 'desc' },
                 select: {
                     startDate: true,
@@ -95,10 +105,70 @@ export class ContextBuilderService {
             });
 
             if (currentCycle) {
-                context.cycleDay = this.calculateCycleDay(currentCycle.startDate);
+                const calculatedDay = this.calculateCycleDay(currentCycle.startDate);
+                if (calculatedDay >= 1 && calculatedDay <= 45) {
+                    context.cycleDay = calculatedDay;
+                    context.currentPhase = this.determinePhase(context.cycleDay);
+                }
                 context.nextPeriodEstimate = await this.estimateNextPeriod(userId);
-                context.currentPhase = this.determinePhase(context.cycleDay);
             }
+        }
+
+        // Get last 14 days daily symptom logs
+        const twoWeeksAgo = new Date();
+        twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+        const recentLogs = await this.prisma.dailyLog.findMany({
+            where: { userId, date: { gte: twoWeeksAgo } },
+            orderBy: { date: 'desc' },
+            take: 14,
+            select: {
+                date: true,
+                flow: true,
+                cramps: true,
+                symptoms: true,
+                mood: true,
+            },
+        });
+
+        if (recentLogs.length > 0) {
+            const symptomFreq = new Map<string, number>();
+            const moodSet = new Set<string>();
+            const crampScores: number[] = [];
+
+            for (const log of recentLogs) {
+                if (typeof log.cramps === 'number' && log.cramps > 0) {
+                    crampScores.push(log.cramps);
+                }
+                if (Array.isArray(log.symptoms)) {
+                    for (const s of log.symptoms as string[]) {
+                        symptomFreq.set(s, (symptomFreq.get(s) || 0) + 1);
+                    }
+                }
+                if (Array.isArray(log.mood)) {
+                    for (const m of log.mood as string[]) {
+                        moodSet.add(m);
+                    }
+                }
+            }
+
+            context.recentSymptoms = {
+                loggedDaysCount: recentLogs.length,
+                latestDate: recentLogs[0].date.toISOString().slice(0, 10),
+                latestFlow: recentLogs[0].flow || undefined,
+                avgCramps:
+                    crampScores.length > 0
+                        ? Number(
+                              (
+                                  crampScores.reduce((a, b) => a + b, 0) / crampScores.length
+                              ).toFixed(1),
+                          )
+                        : undefined,
+                topSymptoms: Array.from(symptomFreq.entries())
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 4)
+                    .map(([s]) => s),
+                recentMoods: Array.from(moodSet).slice(0, 4),
+            };
         }
 
         // Get today's water intake
@@ -168,6 +238,22 @@ export class ContextBuilderService {
             prompt += `\n🩸 Regl Döngüsü: ${context.cycleDay}. gün (${context.currentPhase} fazı)`;
             if (context.nextPeriodEstimate) {
                 prompt += `\n   Sonraki regl tahmini: ${context.nextPeriodEstimate.daysUntil} gün sonra`;
+            }
+        }
+
+        if (context.recentSymptoms) {
+            prompt += `\n📝 Son 14 Gün Semptom Özeti (${context.recentSymptoms.loggedDaysCount} kayıt, son: ${context.recentSymptoms.latestDate}):`;
+            if (context.recentSymptoms.topSymptoms.length > 0) {
+                prompt += `\n   Sık belirtiler: ${context.recentSymptoms.topSymptoms.join(', ')}`;
+            }
+            if (context.recentSymptoms.avgCramps !== undefined) {
+                prompt += `\n   Ortalama kramp şiddeti: ${context.recentSymptoms.avgCramps}/5`;
+            }
+            if (context.recentSymptoms.recentMoods.length > 0) {
+                prompt += `\n   Son ruh halleri: ${context.recentSymptoms.recentMoods.join(', ')}`;
+            }
+            if (context.recentSymptoms.latestFlow) {
+                prompt += `\n   Son akıntı yoğunluğu: ${context.recentSymptoms.latestFlow}`;
             }
         }
 

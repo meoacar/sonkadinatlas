@@ -6,6 +6,9 @@ export interface QnaMetrics {
     totalQuestions: number;
     questionsToday: number;
     questionsThisWeek: number;
+    answeredQuestions: number;
+    closedQuestions: number;
+    pendingReports: number;
     averageAnswersPerQuestion: number;
     unansweredQuestions: number;
     totalAnswers: number;
@@ -187,10 +190,24 @@ export class AnalyticsService {
             },
         });
 
+        // Pending reports & question statuses
+        const pendingReports = await this.prisma.contentReport.count({
+            where: { status: 'PENDING' },
+        });
+        const answeredQuestions = await this.prisma.question.count({
+            where: { status: 'ANSWERED' },
+        });
+        const closedQuestions = await this.prisma.question.count({
+            where: { status: 'CLOSED' },
+        });
+
         return {
             totalQuestions,
             questionsToday,
             questionsThisWeek,
+            answeredQuestions,
+            closedQuestions,
+            pendingReports,
             averageAnswersPerQuestion: Math.round(averageAnswersPerQuestion * 100) / 100,
             unansweredQuestions,
             totalAnswers,

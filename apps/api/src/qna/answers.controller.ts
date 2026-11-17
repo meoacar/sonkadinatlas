@@ -25,6 +25,22 @@ import { SanitizePipe } from './pipes';
 export class AnswersController {
     constructor(private readonly qnaService: QnaService) { }
 
+    @Post('questions/:questionId/answers/admin')
+    @HttpCode(HttpStatus.CREATED)
+    @UseGuards(AdminGuard)
+    @UsePipes(new SanitizePipe())
+    async adminCreateAnswer(
+        @Request() req,
+        @Param('questionId') questionId: string,
+        @Body() dto: CreateAnswerDto,
+    ) {
+        if (!questionId || questionId.length < 10) {
+            throw new BadRequestException('Geçersiz soru ID');
+        }
+        const userId = req.user.id || req.user.sub;
+        return this.qnaService.adminCreateAnswer(questionId, userId, dto);
+    }
+
     @Post('questions/:questionId/answers')
     @HttpCode(HttpStatus.CREATED)
     @Throttle({ default: { limit: 10, ttl: 3600000 } }) // 10 answers per hour
@@ -108,6 +124,23 @@ export class AnswersController {
             throw new BadRequestException('Geçersiz cevap ID');
         }
         await this.qnaService.adminDeleteAnswer(id);
+    }
+
+    @Post('questions/:questionId/answers/:answerId/mark-best/admin')
+    @HttpCode(HttpStatus.OK)
+    @UseGuards(AdminGuard)
+    async adminMarkBestAnswer(
+        @Param('questionId') questionId: string,
+        @Param('answerId') answerId: string,
+    ) {
+        if (!questionId || questionId.length < 10) {
+            throw new BadRequestException('Geçersiz soru ID');
+        }
+        if (!answerId || answerId.length < 10) {
+            throw new BadRequestException('Geçersiz cevap ID');
+        }
+        await this.qnaService.adminMarkBestAnswer(questionId, answerId);
+        return { success: true };
     }
 
     @Post('questions/:questionId/answers/:answerId/mark-best')

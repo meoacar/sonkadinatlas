@@ -34,7 +34,7 @@ export async function loadAndDisplayProducts() {
 
         console.log('Available products:');
         products.forEach(product => {
-            console.log(`- ${product.title}: ${product.localizedPrice}`);
+            console.log(`- ${product.title}: ${product.displayPrice ?? (product as any).localizedPrice}`);
         });
 
         // Get specific product
@@ -58,19 +58,10 @@ export async function handlePurchase(tier: 'monthly' | 'yearly') {
     try {
         console.log(`Starting purchase for ${tier}...`);
 
-        // Step 1: Request purchase from store
-        const purchase = await iapManager.purchase(tier);
+        // Step 1: Request purchase from store (purchase listener handles validation)
+        await iapManager.purchase(tier);
 
-        if (!purchase) {
-            throw new Error('Purchase failed - no purchase object returned');
-        }
-
-        console.log('Purchase successful, validating with backend...');
-
-        // Step 2: Validate with backend
-        await iapManager.validatePurchase(purchase);
-
-        console.log('Purchase validated successfully');
+        console.log('Purchase flow completed');
 
         // Step 3: Update local state
         // This would typically be done through React Query invalidation

@@ -1,18 +1,21 @@
-import { View, Text, StyleSheet, Animated } from 'react-native';
-import { useEffect, useRef } from 'react';
+import { Text, StyleSheet, Animated } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { useTheme } from '@/hooks/useTheme';
 
 export function OfflineBanner() {
     const theme = useTheme();
-    const styles = createStyles(theme);
+    const insets = useSafeAreaInsets();
+    const styles = createStyles(theme, insets.top);
     const { isConnected } = useNetworkStatus();
-    const slideAnim = useRef(new Animated.Value(-100)).current;
+    const slideAnim = useRef(new Animated.Value(-120)).current;
+    const [shouldRender, setShouldRender] = useState(!isConnected);
 
     useEffect(() => {
         if (!isConnected) {
-            // Slide down
+            setShouldRender(true);
             Animated.spring(slideAnim, {
                 toValue: 0,
                 useNativeDriver: true,
@@ -20,17 +23,25 @@ export function OfflineBanner() {
                 friction: 8,
             }).start();
         } else {
-            // Slide up
             Animated.timing(slideAnim, {
-                toValue: -100,
-                duration: 300,
+                toValue: -120,
+                duration: 250,
                 useNativeDriver: true,
-            }).start();
+            }).start(({ finished }) => {
+                if (finished) {
+                    setShouldRender(false);
+                }
+            });
         }
     }, [isConnected, slideAnim]);
 
+    if (!shouldRender) {
+        return null;
+    }
+
     return (
         <Animated.View
+            pointerEvents="none"
             style={[
                 styles.banner,
                 {
@@ -38,13 +49,13 @@ export function OfflineBanner() {
                 },
             ]}
         >
-            <Ionicons name="cloud-offline" size={20} color="#fff" />
+            <Ionicons name="cloud-offline" size={18} color="#fff" />
             <Text style={styles.text}>İnternet bağlantısı yok</Text>
         </Animated.View>
     );
 }
 
-const createStyles = (theme: ReturnType<typeof useTheme>) =>
+const createStyles = (theme: ReturnType<typeof useTheme>, topInset: number) =>
     StyleSheet.create({
         banner: {
             position: 'absolute',
@@ -56,7 +67,8 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
             alignItems: 'center',
             justifyContent: 'center',
             gap: 8,
-            paddingVertical: 12,
+            paddingTop: Math.max(topInset, 12) + 4,
+            paddingBottom: 10,
             paddingHorizontal: theme.spacing.lg,
             zIndex: 1000,
             shadowColor: '#000',
@@ -66,7 +78,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
             elevation: 5,
         },
         text: {
-            fontSize: 14,
+            fontSize: 13.5,
             fontWeight: '600',
             color: '#fff',
         },

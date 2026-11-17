@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { MetricsService } from './metrics.service';
@@ -56,10 +56,33 @@ class CalculateWaterDto {
   climate?: 'cool' | 'temperate' | 'hot';
 }
 
+class CalculateCyclePublicDto {
+  @IsString()
+  lastPeriodDate!: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  cycleLength?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  periodLength?: number;
+}
+
+class CalculatePregnancyPublicDto {
+  @IsOptional()
+  @IsString()
+  lmpDate?: string;
+
+  @IsOptional()
+  @IsString()
+  dueDate?: string;
+}
+
 @ApiTags('metrics')
 @Controller('metrics')
-@UseGuards(AuthGuard('jwt'))
-@ApiBearerAuth()
 export class MetricsController {
   constructor(
     private readonly metricsService: MetricsService,
@@ -67,12 +90,25 @@ export class MetricsController {
   ) { }
 
   @Get()
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Get user health metrics history' })
   async getMetrics(@CurrentUser() user: any) {
     return this.metricsService.getUserMetrics(user.id);
   }
 
+  @Get('health-report')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get aggregated health & doctor summary report' })
+  async getHealthReport(@CurrentUser() user: any, @Query('days') days?: string) {
+    const parsedDays = days ? parseInt(days, 10) : 30;
+    return this.metricsService.getHealthReport(user.id, Number.isNaN(parsedDays) ? 30 : parsedDays);
+  }
+
   @Post('bmi')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Calculate and save BMI' })
   async calculateBMI(@CurrentUser() user: any, @Body() dto: CalculateBMIDto) {
     console.log('BMI Request DTO:', dto);
@@ -106,6 +142,8 @@ export class MetricsController {
   }
 
   @Post('bmr')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Calculate BMR and TDEE' })
   async calculateBMR(@CurrentUser() user: any, @Body() dto: CalculateBMRDto) {
     const bmr = this.calculatorService.calculateBMR(
@@ -140,6 +178,8 @@ export class MetricsController {
   }
 
   @Post('water/calculate')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Calculate daily water need' })
   async calculateWater(@Body() dto: CalculateWaterDto) {
     console.log('Water Request DTO:', dto);
@@ -163,5 +203,81 @@ export class MetricsController {
       dailyNeedMl: dailyNeed,
       dailyNeedL: Math.round(dailyNeed / 100) / 10,
     };
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Public Website Calculator Endpoints (No auth, stateless)
+  // ─────────────────────────────────────────────────────────────
+
+  @Post('public/bmi')
+  @ApiOperation({ summary: 'Public BMI calculation for website visitors' })
+  calculatePublicBMI(@Body() dto: CalculateBMIDto) {
+    if (!dto.heightCm || !dto.weightKg || dto.heightCm <= 0 || dto.weightKg <= 0) {
+      throw new BadRequestException('Geçerli boy ve kilo değerleri giriniz.');
+    }
+    const result = this.calculatorService.calculateBMI(dto.weightKg, dto.heightCm);
+    return {
+      bmi: result.bmi,
+      category: result.category,
+      heightCm: dto.heightCm,
+      weightKg: dto.weightKg,
+    };
+  }
+
+  @Post('public/bmr')
+  @ApiOperation({ summary: 'Public BMR & TDEE calculation for website visitors' })
+  calculatePublicBMR(@Body() dto: CalculateBMRDto) {
+    if (!dto.heightCm || !dto.weightKg || !dto.ageYears) {
+      throw new BadRequestException('Boy, kilo ve yaş alanları zorunludur.');
+    }
+    const bmr = this.calculatorService.calculateBMR(
+      dto.weightKg,
+      dto.heightCm,
+      dto.ageYears,
+      dto.sex || 'female',
+    );
+    const tdee = dto.activityLevel
+      ? this.calculatorService.calculateTDEE(bmr, dto.activityLevel)
+      : this.calculatorService.calculateTDEE(bmr, 'moderate');
+    return {
+      bmr: Math.round(bmr),
+      tdee,
+    };
+  }
+
+  @Post('public/water')
+  @ApiOperation({ summary: 'Public daily water calculation for website visitors' })
+  calculatePublicWater(@Body() dto: CalculateWaterDto) {
+    if (!dto.weightKg || dto.weightKg <= 0) {
+      throw new BadRequestException('Geçerli kilo değeri giriniz.');
+    }
+    const dailyNeed = this.calculatorService.calculateDailyWaterNeed(
+      dto.weightKg,
+      dto.activity || 'moderate',
+      dto.climate || 'temperate',
+    );
+    return {
+      dailyWaterMl: dailyNeed,
+      dailyNeedL: Math.round(dailyNeed / 100) / 10,
+      glasses250Ml: Math.ceil(dailyNeed / 250),
+    };
+  }
+
+  @Post('public/cycle')
+  @ApiOperation({ summary: 'Public cycle & ovulation estimate for website visitors' })
+  calculatePublicCycle(@Body() dto: CalculateCyclePublicDto) {
+    if (!dto.lastPeriodDate || Number.isNaN(Date.parse(dto.lastPeriodDate))) {
+      throw new BadRequestException('Geçerli bir son adet başlangıç tarihi giriniz.');
+    }
+    return this.calculatorService.calculateCycleEstimate(dto);
+  }
+
+  @Post('public/pregnancy')
+  @ApiOperation({ summary: 'Public pregnancy week & due date estimate for website visitors' })
+  calculatePublicPregnancy(@Body() dto: CalculatePregnancyPublicDto) {
+    if (!dto.lmpDate && !dto.dueDate) {
+      throw new BadRequestException('Son adet tarihi veya tahmini doğum tarihi gereklidir.');
+    }
+    return this.calculatorService.calculatePregnancyEstimate(dto);
   }
 }

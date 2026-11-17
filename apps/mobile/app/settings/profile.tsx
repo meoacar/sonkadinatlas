@@ -1,19 +1,21 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
-    View,
-    Text,
-    StyleSheet,
-    ScrollView,
-    TouchableOpacity,
-    TextInput,
-    Image,
-    Alert,
-    Platform,
-    Modal,
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  Image,
+  Alert,
+  Platform,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as SecureStore from 'expo-secure-store';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -23,786 +25,1175 @@ import { userService } from '@/services/api';
 import { useTheme } from '@/hooks/useTheme';
 import { PremiumBadge } from '@/components/premium/PremiumBadge';
 import { usePremium } from '@/hooks/usePremium';
+import { getZodiacSign, ZODIAC_SIGNS } from '@/utils/astrology';
+import {
+  MASCOT_AVATARS,
+  getMascotAvatarUrl,
+  getMatchingMascotId,
+  resolveAvatarSource,
+  type MascotAvatarPreset,
+} from '@/utils/avatar';
 
 export default function ProfileScreen() {
-    const router = useRouter();
-    const queryClient = useQueryClient();
-    const { user } = useAuthStore();
-    const theme = useTheme();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const { user } = useAuthStore();
+  const theme = useTheme();
 
-    const [firstName, setFirstName] = useState('');
-    const [lastName, setLastName] = useState('');
-    const [username, setUsername] = useState('');
-    const [email, setEmail] = useState('');
-    const [birthDate, setBirthDate] = useState<Date | null>(null);
-    const [heightCm, setHeightCm] = useState(165);
-    const [weightKg, setWeightKg] = useState(60);
-    const [profilePictureUri, setProfilePictureUri] = useState<string | null>(null);
-    const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
-    const [checkingUsername, setCheckingUsername] = useState(false);
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [birthDate, setBirthDate] = useState<Date | null>(null);
+  const [heightCm, setHeightCm] = useState(165);
+  const [weightKg, setWeightKg] = useState(60);
+  const [profilePictureUri, setProfilePictureUri] = useState<string | null>(null);
+  const [savingAvatarId, setSavingAvatarId] = useState<string | null>(null);
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [checkingUsername, setCheckingUsername] = useState(false);
 
-    const { isPremium } = usePremium();
+  const { isPremium } = usePremium();
 
-    const { data: userData, isLoading } = useQuery({
-        queryKey: ['me'],
-        queryFn: () => userService.getMe(),
-        staleTime: 0,
-        refetchOnMount: 'always',
-        refetchOnWindowFocus: true,
+  const { data: userData, isLoading } = useQuery({
+    queryKey: ['me'],
+    queryFn: () => userService.getMe(),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+  });
+
+  useEffect(() => {
+    if (userData) {
+      const data = userData as any;
+      setFirstName(data?.profile?.firstName || '');
+      setLastName(data?.profile?.lastName || '');
+      setUsername(data?.username || '');
+      setEmail(data?.email || '');
+      if (data?.profile?.dateOfBirth) {
+        setBirthDate(new Date(data.profile.dateOfBirth));
+      }
+      setHeightCm(data?.profile?.heightCm || 165);
+      setWeightKg(data?.profile?.weightKg || 60);
+      setProfilePictureUri(data?.profile?.profilePictureUrl || null);
+    }
+  }, [userData]);
+
+  useEffect(() => {
+    const currentUsername = (userData as any)?.username;
+    if (
+      !username ||
+      username.toLowerCase() === currentUsername?.toLowerCase() ||
+      username.length < 3
+    ) {
+      setUsernameAvailable(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setCheckingUsername(true);
+      try {
+        const response = await userService.checkUsernameAvailability(username.toLowerCase());
+        setUsernameAvailable((response as any).available);
+      } catch {
+        setUsernameAvailable(null);
+      } finally {
+        setCheckingUsername(false);
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [username, userData]);
+
+  const updateProfileMutation = useMutation({
+    mutationFn: (data: any) => userService.updateMe(data),
+    onSuccess: async (updatedData) => {
+      queryClient.setQueryData(['me'], updatedData);
+      await queryClient.invalidateQueries({ queryKey: ['me'] });
+      await queryClient.invalidateQueries({ queryKey: ['homeSnapshot'] });
+
+      if (user && updatedData) {
+        const updatedUser = {
+          ...user,
+          email: (updatedData as any).email,
+          username: (updatedData as any).username,
+          profile: (updatedData as any).profile,
+        };
+        useAuthStore.setState({ user: updatedUser });
+        await SecureStore.setItemAsync('user', JSON.stringify(updatedUser));
+      }
+      Alert.alert('Başarılı', 'Profiliniz güncellendi');
+      router.back();
+    },
+    onError: (error: any) => {
+      Alert.alert('Hata', error.message || 'Profil güncellenemedi');
+    },
+  });
+
+  const handleUploadAsset = async (localUri: string) => {
+    setProfilePictureUri(localUri);
+    try {
+      const response = await userService.uploadProfilePicture(localUri);
+      setProfilePictureUri(response.profilePictureUrl);
+      await queryClient.invalidateQueries({ queryKey: ['me'] });
+      await queryClient.invalidateQueries({ queryKey: ['homeSnapshot'] });
+
+      if (user && user.profile) {
+        const updatedUser = {
+          ...user,
+          profile: { ...user.profile, profilePictureUrl: response.profilePictureUrl },
+        };
+        useAuthStore.setState({ user: updatedUser });
+        await SecureStore.setItemAsync('user', JSON.stringify(updatedUser));
+      }
+      Alert.alert('Başarılı', 'Profil fotoğrafı güncellendi');
+    } catch (error: any) {
+      Alert.alert('Hata', error.message || 'Fotoğraf yüklenemedi');
+      setProfilePictureUri((userData as any)?.profile?.profilePictureUrl || null);
+    }
+  };
+
+  const pickImage = async () => {
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permissionResult.granted) {
+      Alert.alert('İzin Gerekli', 'Galeri erişim izni gerekiyor');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
     });
 
-    useEffect(() => {
-        if (userData) {
-            const data = userData as any;
-            setFirstName(data?.profile?.firstName || '');
-            setLastName(data?.profile?.lastName || '');
-            setUsername(data?.username || '');
-            setEmail(data?.email || '');
-            if (data?.profile?.dateOfBirth) {
-                setBirthDate(new Date(data.profile.dateOfBirth));
-            }
-            setHeightCm(data?.profile?.heightCm || 165);
-            setWeightKg(data?.profile?.weightKg || 60);
-            setProfilePictureUri(data?.profile?.profilePictureUrl || null);
-        }
-    }, [userData]);
+    if (!result.canceled && result.assets[0]) {
+      await handleUploadAsset(result.assets[0].uri);
+    }
+  };
 
-    useEffect(() => {
-        const currentUsername = (userData as any)?.username;
-        if (!username || username.toLowerCase() === currentUsername?.toLowerCase() || username.length < 3) {
-            setUsernameAvailable(null);
-            return;
-        }
+  const takePhoto = async () => {
+    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permissionResult.granted) {
+      Alert.alert('İzin Gerekli', 'Kamera erişim izni gerekiyor');
+      return;
+    }
 
-        const timer = setTimeout(async () => {
-            setCheckingUsername(true);
-            try {
-                const response = await userService.checkUsernameAvailability(username.toLowerCase());
-                setUsernameAvailable((response as any).available);
-            } catch (error) {
-                setUsernameAvailable(null);
-            } finally {
-                setCheckingUsername(false);
-            }
-        }, 500);
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
 
-        return () => clearTimeout(timer);
-    }, [username, userData]);
+    if (!result.canceled && result.assets[0]) {
+      await handleUploadAsset(result.assets[0].uri);
+    }
+  };
 
-    const updateProfileMutation = useMutation({
-        mutationFn: (data: any) => userService.updateMe(data),
-        onSuccess: async (updatedData) => {
-            queryClient.setQueryData(['me'], updatedData);
+  const deleteProfilePicture = () => {
+    Alert.alert('Profil Fotoğrafını Sil', 'Profil fotoğrafınızı silmek istediğinizden emin misiniz?', [
+      { text: 'İptal', style: 'cancel' },
+      {
+        text: 'Sil',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await userService.updateMe({ profilePictureUrl: null });
+            setProfilePictureUri(null);
             await queryClient.invalidateQueries({ queryKey: ['me'] });
             await queryClient.invalidateQueries({ queryKey: ['homeSnapshot'] });
 
-            if (user && updatedData) {
-                const updatedUser = {
-                    ...user,
-                    email: (updatedData as any).email,
-                    username: (updatedData as any).username,
-                    profile: (updatedData as any).profile,
-                };
-                useAuthStore.setState({ user: updatedUser });
-                await SecureStore.setItemAsync('user', JSON.stringify(updatedUser));
+            if (user && user.profile) {
+              const updatedUser = {
+                ...user,
+                profile: { ...user.profile, profilePictureUrl: undefined },
+              };
+              useAuthStore.setState({ user: updatedUser });
+              await SecureStore.setItemAsync('user', JSON.stringify(updatedUser));
             }
-            Alert.alert('Başarılı', 'Profil güncellendi');
-            router.back();
+            Alert.alert('Başarılı', 'Profil fotoğrafı silindi');
+          } catch (error: any) {
+            Alert.alert('Hata', error.message || 'Fotoğraf silinemedi');
+          }
         },
-        onError: (error: any) => {
-            Alert.alert('Hata', error.message || 'Profil güncellenemedi');
-        },
-    });
+      },
+    ]);
+  };
 
-    const pickImage = async () => {
-        const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!permissionResult.granted) {
-            Alert.alert('İzin Gerekli', 'Profil fotoğrafı eklemek için galeriye erişim izni gerekiyor');
-            return;
-        }
+  const handleProfilePicturePress = () => {
+    Alert.alert('Profil Fotoğrafı', 'Nasıl güncellemek istersiniz?', [
+      { text: 'Galeriden Seç', onPress: pickImage },
+      { text: 'Fotoğraf Çek', onPress: takePhoto },
+      ...(profilePictureUri
+        ? [{ text: 'Fotoğrafı Sil', onPress: deleteProfilePicture, style: 'destructive' as const }]
+        : []),
+      { text: 'İptal', style: 'cancel' },
+    ]);
+  };
 
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.8,
-        });
+  const handleSelectMascotAvatar = async (preset: MascotAvatarPreset) => {
+    if (savingAvatarId) return;
+    const previousUri = profilePictureUri;
+    const nextUrl = getMascotAvatarUrl(preset);
 
-        if (!result.canceled && result.assets[0]) {
-            const localUri = result.assets[0].uri;
-            setProfilePictureUri(localUri);
+    setSavingAvatarId(preset.id);
+    setProfilePictureUri(nextUrl);
+    try {
+      const updatedData = await userService.updateMe({ profilePictureUrl: nextUrl });
+      const resolvedUrl =
+        (updatedData as any)?.profile?.profilePictureUrl || nextUrl;
 
-            try {
-                const response = await userService.uploadProfilePicture(localUri);
-                setProfilePictureUri(response.profilePictureUrl);
-                await queryClient.invalidateQueries({ queryKey: ['me'] });
-                await queryClient.invalidateQueries({ queryKey: ['homeSnapshot'] });
+      setProfilePictureUri(resolvedUrl);
+      if (updatedData) {
+        queryClient.setQueryData(['me'], updatedData);
+      }
+      await queryClient.invalidateQueries({ queryKey: ['me'] });
+      await queryClient.invalidateQueries({ queryKey: ['homeSnapshot'] });
 
-                if (user && user.profile) {
-                    const updatedUser = {
-                        ...user,
-                        profile: { ...user.profile, profilePictureUrl: response.profilePictureUrl },
-                    };
-                    useAuthStore.setState({ user: updatedUser });
-                    await SecureStore.setItemAsync('user', JSON.stringify(updatedUser));
-                }
-                Alert.alert('Başarılı', 'Profil fotoğrafı güncellendi');
-            } catch (error: any) {
-                Alert.alert('Hata', error.message || 'Fotoğraf yüklenemedi');
-                setProfilePictureUri((userData as any)?.profile?.profilePictureUrl || null);
-            }
-        }
-    };
-
-    const takePhoto = async () => {
-        const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-        if (!permissionResult.granted) {
-            Alert.alert('İzin Gerekli', 'Fotoğraf çekmek için kamera erişim izni gerekiyor');
-            return;
-        }
-
-        const result = await ImagePicker.launchCameraAsync({
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.8,
-        });
-
-        if (!result.canceled && result.assets[0]) {
-            const localUri = result.assets[0].uri;
-            setProfilePictureUri(localUri);
-
-            try {
-                const response = await userService.uploadProfilePicture(localUri);
-                setProfilePictureUri(response.profilePictureUrl);
-                await queryClient.invalidateQueries({ queryKey: ['me'] });
-                await queryClient.invalidateQueries({ queryKey: ['homeSnapshot'] });
-
-                if (user && user.profile) {
-                    const updatedUser = {
-                        ...user,
-                        profile: { ...user.profile, profilePictureUrl: response.profilePictureUrl },
-                    };
-                    useAuthStore.setState({ user: updatedUser });
-                    await SecureStore.setItemAsync('user', JSON.stringify(updatedUser));
-                }
-                Alert.alert('Başarılı', 'Profil fotoğrafı güncellendi');
-            } catch (error: any) {
-                Alert.alert('Hata', error.message || 'Fotoğraf yüklenemedi');
-                setProfilePictureUri((userData as any)?.profile?.profilePictureUrl || null);
-            }
-        }
-    };
-
-    const deleteProfilePicture = () => {
-        Alert.alert(
-            'Profil Fotoğrafını Sil',
-            'Profil fotoğrafınızı silmek istediğinizden emin misiniz?',
-            [
-                { text: 'İptal', style: 'cancel' },
-                {
-                    text: 'Sil',
-                    style: 'destructive',
-                    onPress: async () => {
-                        try {
-                            await userService.updateMe({ profilePictureUrl: null });
-                            setProfilePictureUri(null);
-                            await queryClient.invalidateQueries({ queryKey: ['me'] });
-                            await queryClient.invalidateQueries({ queryKey: ['homeSnapshot'] });
-
-                            if (user && user.profile) {
-                                const updatedUser = {
-                                    ...user,
-                                    profile: { ...user.profile, profilePictureUrl: undefined },
-                                };
-                                useAuthStore.setState({ user: updatedUser });
-                                await SecureStore.setItemAsync('user', JSON.stringify(updatedUser));
-                            }
-                            Alert.alert('Başarılı', 'Profil fotoğrafı silindi');
-                        } catch (error: any) {
-                            Alert.alert('Hata', error.message || 'Fotoğraf silinemedi');
-                        }
-                    },
-                },
-            ]
-        );
-    };
-
-    const handleProfilePicturePress = () => {
-        Alert.alert(
-            'Profil Fotoğrafı',
-            'Profil fotoğrafınızı nasıl güncellemek istersiniz?',
-            [
-                { text: 'Galeriden Seç', onPress: pickImage },
-                { text: 'Fotoğraf Çek', onPress: takePhoto },
-                ...(profilePictureUri
-                    ? [{ text: 'Fotoğrafı Sil', onPress: deleteProfilePicture, style: 'destructive' as const }]
-                    : []),
-                { text: 'İptal', style: 'cancel' },
-            ]
-        );
-    };
-
-    const handleSaveProfile = async () => {
-        try {
-            const currentUsername = (userData as any)?.username;
-            if (username && username.toLowerCase() !== currentUsername?.toLowerCase()) {
-                if (usernameAvailable === false) {
-                    Alert.alert('Hata', 'Bu kullanıcı adı zaten kullanılıyor');
-                    return;
-                }
-
-                const normalizedUsername = username.toLowerCase();
-                if (!/^[a-z0-9._]+$/.test(normalizedUsername)) {
-                    Alert.alert('Hata', 'Kullanıcı adı sadece küçük harf, rakam, nokta ve alt çizgi içerebilir');
-                    return;
-                }
-                if (normalizedUsername.length < 3 || normalizedUsername.length > 24) {
-                    Alert.alert('Hata', 'Kullanıcı adı 3-24 karakter arasında olmalıdır');
-                    return;
-                }
-
-                const usernameResponse = await userService.updateUsername(normalizedUsername);
-                queryClient.setQueryData(['me'], usernameResponse);
-                await queryClient.invalidateQueries({ queryKey: ['homeSnapshot'] });
-
-                if (user) {
-                    const updatedUser = {
-                        ...user,
-                        username: (usernameResponse as any).username,
-                        profile: (usernameResponse as any).profile,
-                    };
-                    useAuthStore.setState({ user: updatedUser });
-                    await SecureStore.setItemAsync('user', JSON.stringify(updatedUser));
-                }
-            }
-
-            const profileData: any = {
-                firstName,
-                lastName,
-                email,
-                dateOfBirth: birthDate ? birthDate.toISOString() : null,
-                heightCm,
-                weightKg,
-            };
-
-            updateProfileMutation.mutate(profileData);
-        } catch (error: any) {
-            Alert.alert('Hata', error.message || 'Profil güncellenemedi');
-        }
-    };
-
-    const currentDisplayName = (userData as any)?.profile?.displayName || user?.email?.split('@')[0] || 'Misafir';
-    const styles = createStyles(theme);
-
-    if (isLoading) {
-        return (
-            <SafeAreaView style={styles.safeArea}>
-                <View style={styles.loadingContainer}>
-                    <Text style={styles.loadingText}>Yükleniyor...</Text>
-                </View>
-            </SafeAreaView>
-        );
+      if (user) {
+        const updatedUser = {
+          ...user,
+          profile: (updatedData as any)?.profile || {
+            ...(user.profile || {}),
+            profilePictureUrl: resolvedUrl,
+          },
+        };
+        useAuthStore.setState({ user: updatedUser });
+        await SecureStore.setItemAsync('user', JSON.stringify(updatedUser));
+      }
+    } catch (error: any) {
+      setProfilePictureUri(previousUri);
+      Alert.alert('Hata', error?.message || 'Maskot avatarı kaydedilemedi');
+    } finally {
+      setSavingAvatarId(null);
     }
+  };
 
-    return (
-        <SafeAreaView style={styles.safeArea} edges={['top']}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                    <Text style={styles.backButtonText}>‹ Geri</Text>
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>Profil Düzenle</Text>
-                <TouchableOpacity
-                    onPress={handleSaveProfile}
-                    disabled={updateProfileMutation.isPending || usernameAvailable === false || checkingUsername}
-                >
-                    <Text style={[styles.saveText, (updateProfileMutation.isPending || usernameAvailable === false || checkingUsername) && styles.saveTextDisabled]}>
-                        {updateProfileMutation.isPending ? 'Kaydediliyor...' : 'Kaydet'}
-                    </Text>
-                </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-                {/* Profile Picture */}
-                <View style={styles.profilePictureSection}>
-                    <TouchableOpacity onPress={handleProfilePicturePress}>
-                        <View style={styles.profileImageContainer}>
-                            {profilePictureUri ? (
-                                <Image source={{ uri: profilePictureUri }} style={styles.profileImage} />
-                            ) : (
-                                <View style={styles.profilePlaceholder}>
-                                    <Text style={styles.profilePlaceholderText}>
-                                        {currentDisplayName.charAt(0).toUpperCase()}
-                                    </Text>
-                                </View>
-                            )}
-                            {isPremium && (
-                                <View style={styles.premiumBadgeOverlay}>
-                                    <PremiumBadge size="small" variant="icon" />
-                                </View>
-                            )}
-                        </View>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={handleProfilePicturePress} style={styles.changePhotoButton}>
-                        <Text style={styles.changePhotoText}>Fotoğrafı Değiştir</Text>
-                    </TouchableOpacity>
-                </View>
-
-                {/* Profile Form */}
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>Ad</Text>
-                    <TextInput
-                        style={styles.input}
-                        value={firstName}
-                        onChangeText={setFirstName}
-                        placeholder="Adınız"
-                        placeholderTextColor={theme.colors.textLight}
-                    />
-                </View>
-
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>Soyad</Text>
-                    <TextInput
-                        style={styles.input}
-                        value={lastName}
-                        onChangeText={setLastName}
-                        placeholder="Soyadınız"
-                        placeholderTextColor={theme.colors.textLight}
-                    />
-                </View>
-
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>Kullanıcı Adı</Text>
-                    <TextInput
-                        style={styles.input}
-                        value={username}
-                        onChangeText={setUsername}
-                        placeholder="kullaniciadi"
-                        placeholderTextColor={theme.colors.textLight}
-                        autoCapitalize="none"
-                    />
-                    {username && username.toLowerCase() !== (userData as any)?.username?.toLowerCase() && (
-                        <>
-                            {checkingUsername && <Text style={styles.helperText}>Kontrol ediliyor...</Text>}
-                            {!checkingUsername && usernameAvailable === true && <Text style={styles.successText}>✓ Kullanılabilir</Text>}
-                            {!checkingUsername && usernameAvailable === false && <Text style={styles.errorText}>✗ Bu kullanıcı adı alınmış</Text>}
-                        </>
-                    )}
-                </View>
-
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>E-posta</Text>
-                    <TextInput
-                        style={styles.input}
-                        value={email}
-                        onChangeText={setEmail}
-                        placeholder="E-posta adresiniz"
-                        placeholderTextColor={theme.colors.textLight}
-                        keyboardType="email-address"
-                        autoCapitalize="none"
-                    />
-                </View>
-
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>Doğum Tarihi</Text>
-                    <DatePickerButton value={birthDate} onChange={setBirthDate} theme={theme} />
-                </View>
-
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>Boy (cm)</Text>
-                    <NumberPickerButton
-                        value={heightCm}
-                        onChange={setHeightCm}
-                        min={100}
-                        max={250}
-                        label="Boy Seçin"
-                        theme={theme}
-                    />
-                </View>
-
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>Kilo (kg)</Text>
-                    <NumberPickerButton
-                        value={weightKg}
-                        onChange={setWeightKg}
-                        min={30}
-                        max={200}
-                        label="Kilo Seçin"
-                        theme={theme}
-                    />
-                </View>
-            </ScrollView>
-        </SafeAreaView>
-    );
-}
-
-// Date Picker Component
-function DatePickerButton({ value, onChange, theme }: { value: Date | null; onChange: (date: Date) => void; theme: any }) {
-    const { isDarkMode } = useThemeStore();
-    const [showPicker, setShowPicker] = useState(false);
-    const [tempDate, setTempDate] = useState(value || new Date(2000, 0, 1));
-
-    useEffect(() => {
-        if (value) setTempDate(value);
-    }, [value]);
-
-    const displayText = value
-        ? value.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })
-        : 'Doğum tarihi seçin';
-
-    const styles = createPickerStyles(theme);
-
-    const handleDateChange = (event: any, selectedDate?: Date) => {
-        if (Platform.OS === 'android') {
-            setShowPicker(false);
-            if (event.type === 'set' && selectedDate) onChange(selectedDate);
-        } else {
-            if (selectedDate) setTempDate(selectedDate);
+  const handleSaveProfile = async () => {
+    try {
+      const currentUsername = (userData as any)?.username;
+      if (username && username.toLowerCase() !== currentUsername?.toLowerCase()) {
+        if (usernameAvailable === false) {
+          Alert.alert('Hata', 'Bu kullanıcı adı zaten kullanılıyor');
+          return;
         }
-    };
 
-    const handleIOSConfirm = () => {
-        onChange(tempDate);
-        setShowPicker(false);
-    };
+        const normalizedUsername = username.toLowerCase();
+        if (!/^[a-z0-9._]+$/.test(normalizedUsername)) {
+          Alert.alert(
+            'Hata',
+            'Kullanıcı adı sadece küçük harf, rakam, nokta ve alt çizgi içerebilir'
+          );
+          return;
+        }
+        if (normalizedUsername.length < 3 || normalizedUsername.length > 24) {
+          Alert.alert('Hata', 'Kullanıcı adı 3-24 karakter arasında olmalıdır');
+          return;
+        }
 
+        const usernameResponse = await userService.updateUsername(normalizedUsername);
+        queryClient.setQueryData(['me'], usernameResponse);
+        await queryClient.invalidateQueries({ queryKey: ['homeSnapshot'] });
+
+        if (user) {
+          const updatedUser = {
+            ...user,
+            username: (usernameResponse as any).username,
+            profile: (usernameResponse as any).profile,
+          };
+          useAuthStore.setState({ user: updatedUser });
+          await SecureStore.setItemAsync('user', JSON.stringify(updatedUser));
+        }
+      }
+
+      updateProfileMutation.mutate({
+        firstName,
+        lastName,
+        email,
+        dateOfBirth: birthDate ? birthDate.toISOString() : null,
+        heightCm,
+        weightKg,
+      });
+    } catch (error: any) {
+      Alert.alert('Hata', error.message || 'Profil güncellenemedi');
+    }
+  };
+
+  const liveMetrics = useMemo(() => {
+    const h = heightCm / 100;
+    const bmi = h > 0 ? weightKg / (h * h) : 0;
+    const bmiLabel =
+      bmi < 18.5
+        ? 'Zayıf'
+        : bmi < 25
+          ? 'Normal'
+          : bmi < 30
+            ? 'Fazla Kilolu'
+            : 'Yüksek';
+    const waterTargetMl = Math.round(weightKg * 30);
+    const zodiac = birthDate ? ZODIAC_SIGNS[getZodiacSign(birthDate)] : null;
+    return { bmi: bmi.toFixed(1), bmiLabel, waterTargetMl, zodiac };
+  }, [heightCm, weightKg, birthDate]);
+
+  const currentDisplayName =
+    firstName && lastName
+      ? `${firstName} ${lastName}`
+      : (userData as any)?.profile?.displayName || user?.email?.split('@')[0] || 'Misafir';
+
+  const styles = createStyles(theme);
+
+  if (isLoading) {
     return (
-        <>
-            <TouchableOpacity style={styles.pickerButton} onPress={() => setShowPicker(true)}>
-                <Text style={styles.pickerButtonText}>{displayText}</Text>
-                <Text style={styles.pickerButtonIcon}>📅</Text>
-            </TouchableOpacity>
-
-            {Platform.OS === 'ios' && showPicker && (
-                <Modal visible={showPicker} transparent animationType="slide">
-                    <View style={styles.modalOverlay}>
-                        <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={() => setShowPicker(false)} />
-                        <View style={styles.pickerContainer}>
-                            <View style={styles.pickerHeader}>
-                                <TouchableOpacity onPress={() => setShowPicker(false)}>
-                                    <Text style={styles.cancelText}>İptal</Text>
-                                </TouchableOpacity>
-                                <Text style={styles.pickerTitle}>Doğum Tarihi</Text>
-                                <TouchableOpacity onPress={handleIOSConfirm}>
-                                    <Text style={styles.confirmText}>Tamam</Text>
-                                </TouchableOpacity>
-                            </View>
-                            <View style={styles.datePickerWrapper}>
-                                <DateTimePicker
-                                    value={tempDate}
-                                    mode="date"
-                                    display="inline"
-                                    onChange={handleDateChange}
-                                    maximumDate={new Date()}
-                                    minimumDate={new Date(1900, 0, 1)}
-                                    locale="tr-TR"
-                                    themeVariant={isDarkMode ? 'dark' : 'light'}
-                                />
-                            </View>
-                        </View>
-                    </View>
-                </Modal>
-            )}
-
-            {Platform.OS === 'android' && showPicker && (
-                <DateTimePicker
-                    value={tempDate}
-                    mode="date"
-                    display="calendar"
-                    onChange={handleDateChange}
-                    maximumDate={new Date()}
-                    minimumDate={new Date(1900, 0, 1)}
-                />
-            )}
-        </>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+        </View>
+      </SafeAreaView>
     );
-}
+  }
 
-// Number Picker Component
-function NumberPickerButton({ value, onChange, min, max, label, theme }: {
-    value: number;
-    onChange: (value: number) => void;
-    min: number;
-    max: number;
-    label: string;
-    theme: any;
-}) {
-    const [showPicker, setShowPicker] = useState(false);
-    const [selectedValue, setSelectedValue] = useState(value);
+  return (
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Ionicons name="chevron-back" size={20} color={theme.colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Profili Düzenle</Text>
+        <TouchableOpacity
+          onPress={handleSaveProfile}
+          style={[
+            styles.savePill,
+            (updateProfileMutation.isPending || usernameAvailable === false || checkingUsername) &&
+              styles.savePillDisabled,
+          ]}
+          disabled={
+            updateProfileMutation.isPending || usernameAvailable === false || checkingUsername
+          }
+          activeOpacity={0.85}
+        >
+          {updateProfileMutation.isPending ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.savePillText}>Kaydet</Text>
+          )}
+        </TouchableOpacity>
+      </View>
 
-    const numbers = Array.from({ length: max - min + 1 }, (_, i) => min + i);
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Avatar Section */}
+        <View style={styles.avatarCard}>
+          <TouchableOpacity
+            onPress={handleProfilePicturePress}
+            style={styles.avatarContainer}
+            activeOpacity={0.85}
+          >
+            {profilePictureUri ? (
+              <Image
+                source={resolveAvatarSource(profilePictureUri)!}
+                style={styles.profileImage}
+              />
+            ) : (
+              <View style={styles.profilePlaceholder}>
+                <Text style={styles.profilePlaceholderText}>
+                  {currentDisplayName.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
+            <View style={styles.cameraOverlay}>
+              <Ionicons name="camera" size={14} color="#FFFFFF" />
+            </View>
+            {isPremium && (
+              <View style={styles.premiumBadgeOverlay}>
+                <PremiumBadge size="small" variant="icon" />
+              </View>
+            )}
+          </TouchableOpacity>
+          <Text style={styles.avatarName}>{currentDisplayName}</Text>
 
-    const handleConfirm = () => {
-        onChange(selectedValue);
-        setShowPicker(false);
-    };
-
-    const styles = createPickerStyles(theme);
-
-    return (
-        <>
-            <TouchableOpacity style={styles.pickerButton} onPress={() => setShowPicker(true)}>
-                <Text style={styles.pickerButtonText}>{value}</Text>
-                <Text style={styles.pickerButtonIcon}>▼</Text>
+          <View style={styles.photoActionsRow}>
+            <TouchableOpacity
+              onPress={pickImage}
+              style={styles.photoActionPill}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="images-outline" size={14} color={theme.colors.primary} />
+              <Text style={styles.photoActionText}>Galeriden Seç</Text>
             </TouchableOpacity>
 
-            <Modal visible={showPicker} transparent animationType="slide">
-                <View style={styles.modalOverlay}>
-                    <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={() => setShowPicker(false)} />
-                    <View style={styles.pickerContainer}>
-                        <View style={styles.pickerHeader}>
-                            <TouchableOpacity onPress={() => setShowPicker(false)}>
-                                <Text style={styles.cancelText}>İptal</Text>
-                            </TouchableOpacity>
-                            <Text style={styles.pickerTitle}>{label}</Text>
-                            <TouchableOpacity onPress={handleConfirm}>
-                                <Text style={styles.confirmText}>Tamam</Text>
-                            </TouchableOpacity>
-                        </View>
+            <TouchableOpacity
+              onPress={takePhoto}
+              style={styles.photoActionPill}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="camera-outline" size={14} color={theme.colors.primary} />
+              <Text style={styles.photoActionText}>Fotoğraf Çek</Text>
+            </TouchableOpacity>
 
-                        <ScrollView style={styles.numberPickerScroll} contentContainerStyle={styles.numberPickerContent}>
-                            {numbers.map((num) => (
-                                <TouchableOpacity
-                                    key={num}
-                                    style={[styles.numberItem, selectedValue === num && styles.numberItemSelected]}
-                                    onPress={() => setSelectedValue(num)}
-                                >
-                                    <Text style={[styles.numberText, selectedValue === num && styles.numberTextSelected]}>
-                                        {num}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
+            {profilePictureUri ? (
+              <TouchableOpacity
+                onPress={deleteProfilePicture}
+                style={[styles.photoActionPill, styles.photoRemovePill]}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="trash-outline" size={14} color={theme.colors.error} />
+                <Text style={styles.photoRemoveText}>Kaldır</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
+
+        {/* Mascot Avatar Presets */}
+        <View style={styles.formCard}>
+          <View style={styles.mascotHeaderRow}>
+            <View>
+              <Text style={styles.cardSectionTitle}>Maskot Avatarları</Text>
+              <Text style={styles.mascotSubtitle}>
+                Fotoğraf yüklemek istemezsen 6 maskotumuzdan birini seç
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.mascotGrid}>
+            {MASCOT_AVATARS.map((preset) => {
+              const selected = getMatchingMascotId(profilePictureUri) === preset.id;
+              const isSaving = savingAvatarId === preset.id;
+
+              return (
+                <TouchableOpacity
+                  key={preset.id}
+                  activeOpacity={0.82}
+                  disabled={Boolean(savingAvatarId)}
+                  onPress={() => handleSelectMascotAvatar(preset)}
+                  style={[
+                    styles.mascotTile,
+                    selected && {
+                      borderColor: preset.accent,
+                      backgroundColor: theme.isDark
+                        ? 'rgba(255, 105, 180, 0.1)'
+                        : '#FFF5F9',
+                    },
+                  ]}
+                >
+                  <View style={styles.mascotAvatarWrap}>
+                    <Image source={preset.source} style={styles.mascotAvatarImg} />
+                    {isSaving ? (
+                      <View style={styles.mascotLoadingOverlay}>
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      </View>
+                    ) : selected ? (
+                      <View
+                        style={[
+                          styles.mascotCheckBadge,
+                          { backgroundColor: preset.accent },
+                        ]}
+                      >
+                        <Ionicons name="checkmark" size={11} color="#FFFFFF" />
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text
+                    style={[
+                      styles.mascotLabel,
+                      selected && { color: preset.accent, fontWeight: '800' },
+                    ]}
+                  >
+                    {preset.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Live Health & Zodiac Preview */}
+        <View style={styles.previewStrip}>
+          <View style={styles.previewTile}>
+            <Text style={styles.previewValue}>{liveMetrics.bmi}</Text>
+            <Text style={styles.previewLabel}>VKİ ({liveMetrics.bmiLabel})</Text>
+          </View>
+          <View style={styles.previewDivider} />
+          <View style={styles.previewTile}>
+            <Text style={styles.previewValue}>{liveMetrics.waterTargetMl} ml</Text>
+            <Text style={styles.previewLabel}>Önerilen Su</Text>
+          </View>
+          <View style={styles.previewDivider} />
+          <View style={styles.previewTile}>
+            <Text style={styles.previewValue}>
+              {liveMetrics.zodiac
+                ? `${liveMetrics.zodiac.emoji} ${liveMetrics.zodiac.nameTr}`
+                : '—'}
+            </Text>
+            <Text style={styles.previewLabel}>Burç</Text>
+          </View>
+        </View>
+
+        {/* Personal Info Card */}
+        <View style={styles.formCard}>
+          <Text style={styles.cardSectionTitle}>Kişisel Bilgiler</Text>
+
+          <View style={styles.nameRow}>
+            <View style={[styles.formGroup, { flex: 1 }]}>
+              <Text style={styles.label}>Ad</Text>
+              <TextInput
+                style={styles.input}
+                value={firstName}
+                onChangeText={setFirstName}
+                placeholder="Adınız"
+                placeholderTextColor={theme.colors.textLight}
+              />
+            </View>
+            <View style={[styles.formGroup, { flex: 1 }]}>
+              <Text style={styles.label}>Soyad</Text>
+              <TextInput
+                style={styles.input}
+                value={lastName}
+                onChangeText={setLastName}
+                placeholder="Soyadınız"
+                placeholderTextColor={theme.colors.textLight}
+              />
+            </View>
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Kullanıcı Adı</Text>
+            <TextInput
+              style={styles.input}
+              value={username}
+              onChangeText={setUsername}
+              placeholder="kullaniciadi"
+              placeholderTextColor={theme.colors.textLight}
+              autoCapitalize="none"
+            />
+            {username &&
+              username.toLowerCase() !== (userData as any)?.username?.toLowerCase() && (
+                <View style={styles.usernameStatus}>
+                  {checkingUsername && (
+                    <Text style={styles.helperText}>Kontrol ediliyor...</Text>
+                  )}
+                  {!checkingUsername && usernameAvailable === true && (
+                    <View style={styles.statusInline}>
+                      <Ionicons name="checkmark-circle" size={14} color={theme.colors.success} />
+                      <Text style={styles.successText}>Kullanılabilir</Text>
                     </View>
+                  )}
+                  {!checkingUsername && usernameAvailable === false && (
+                    <View style={styles.statusInline}>
+                      <Ionicons name="close-circle" size={14} color={theme.colors.error} />
+                      <Text style={styles.errorText}>Bu kullanıcı adı alınmış</Text>
+                    </View>
+                  )}
                 </View>
-            </Modal>
-        </>
-    );
+              )}
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>E-posta</Text>
+            <TextInput
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+              placeholder="E-posta adresiniz"
+              placeholderTextColor={theme.colors.textLight}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Doğum Tarihi</Text>
+            <DatePickerButton value={birthDate} onChange={setBirthDate} theme={theme} />
+          </View>
+        </View>
+
+        {/* Body Measurements Card */}
+        <View style={styles.formCard}>
+          <Text style={styles.cardSectionTitle}>Vücut Ölçüleri</Text>
+          <View style={styles.nameRow}>
+            <View style={[styles.formGroup, { flex: 1 }]}>
+              <Text style={styles.label}>Boy (cm)</Text>
+              <NumberPickerButton
+                value={heightCm}
+                onChange={setHeightCm}
+                min={100}
+                max={250}
+                unit="cm"
+                label="Boy Seçin"
+                theme={theme}
+              />
+            </View>
+            <View style={[styles.formGroup, { flex: 1 }]}>
+              <Text style={styles.label}>Kilo (kg)</Text>
+              <NumberPickerButton
+                value={weightKg}
+                onChange={setWeightKg}
+                min={30}
+                max={200}
+                unit="kg"
+                label="Kilo Seçin"
+                theme={theme}
+              />
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
 }
+
+function DatePickerButton({
+  value,
+  onChange,
+  theme,
+}: {
+  value: Date | null;
+  onChange: (date: Date) => void;
+  theme: any;
+}) {
+  const { isDarkMode } = useThemeStore();
+  const [showPicker, setShowPicker] = useState(false);
+  const [tempDate, setTempDate] = useState(value || new Date(2000, 0, 1));
+
+  useEffect(() => {
+    if (value) setTempDate(value);
+  }, [value]);
+
+  const displayText = value
+    ? value.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })
+    : 'Doğum tarihi seçin';
+
+  const styles = createPickerStyles(theme);
+
+  const handleDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowPicker(false);
+      if (event.type === 'set' && selectedDate) onChange(selectedDate);
+    } else if (selectedDate) {
+      setTempDate(selectedDate);
+    }
+  };
+
+  return (
+    <>
+      <TouchableOpacity style={styles.pickerButton} onPress={() => setShowPicker(true)}>
+        <Text style={styles.pickerButtonText}>{displayText}</Text>
+        <Ionicons name="calendar-outline" size={18} color={theme.colors.primary} />
+      </TouchableOpacity>
+
+      {Platform.OS === 'ios' && showPicker && (
+        <Modal visible={showPicker} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <TouchableOpacity
+              style={styles.backdrop}
+              activeOpacity={1}
+              onPress={() => setShowPicker(false)}
+            />
+            <View style={styles.pickerContainer}>
+              <View style={styles.pickerHeader}>
+                <TouchableOpacity onPress={() => setShowPicker(false)}>
+                  <Text style={styles.cancelText}>İptal</Text>
+                </TouchableOpacity>
+                <Text style={styles.pickerTitle}>Doğum Tarihi</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    onChange(tempDate);
+                    setShowPicker(false);
+                  }}
+                >
+                  <Text style={styles.confirmText}>Tamam</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.datePickerWrapper}>
+                <DateTimePicker
+                  value={tempDate}
+                  mode="date"
+                  display="inline"
+                  onChange={handleDateChange}
+                  maximumDate={new Date()}
+                  minimumDate={new Date(1900, 0, 1)}
+                  locale="tr-TR"
+                  themeVariant={isDarkMode ? 'dark' : 'light'}
+                />
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {Platform.OS === 'android' && showPicker && (
+        <DateTimePicker
+          value={tempDate}
+          mode="date"
+          display="calendar"
+          onChange={handleDateChange}
+          maximumDate={new Date()}
+          minimumDate={new Date(1900, 0, 1)}
+        />
+      )}
+    </>
+  );
+}
+
+function NumberPickerButton({
+  value,
+  onChange,
+  min,
+  max,
+  unit,
+  label,
+  theme,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  min: number;
+  max: number;
+  unit: string;
+  label: string;
+  theme: any;
+}) {
+  const [showPicker, setShowPicker] = useState(false);
+  const [selectedValue, setSelectedValue] = useState(value);
+
+  useEffect(() => {
+    setSelectedValue(value);
+  }, [value]);
+
+  const numbers = Array.from({ length: max - min + 1 }, (_, i) => min + i);
+  const styles = createPickerStyles(theme);
+
+  return (
+    <>
+      <TouchableOpacity style={styles.pickerButton} onPress={() => setShowPicker(true)}>
+        <Text style={styles.pickerButtonText}>
+          {value} {unit}
+        </Text>
+        <Ionicons name="chevron-down" size={16} color={theme.colors.textLight} />
+      </TouchableOpacity>
+
+      <Modal visible={showPicker} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.backdrop}
+            activeOpacity={1}
+            onPress={() => setShowPicker(false)}
+          />
+          <View style={styles.pickerContainer}>
+            <View style={styles.pickerHeader}>
+              <TouchableOpacity onPress={() => setShowPicker(false)}>
+                <Text style={styles.cancelText}>İptal</Text>
+              </TouchableOpacity>
+              <Text style={styles.pickerTitle}>{label}</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  onChange(selectedValue);
+                  setShowPicker(false);
+                }}
+              >
+                <Text style={styles.confirmText}>Tamam</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.numberPickerScroll}>
+              {numbers.map((num) => (
+                <TouchableOpacity
+                  key={num}
+                  style={[
+                    styles.numberOption,
+                    selectedValue === num && styles.numberOptionSelected,
+                  ]}
+                  onPress={() => setSelectedValue(num)}
+                >
+                  <Text
+                    style={[
+                      styles.numberOptionText,
+                      selectedValue === num && styles.numberOptionTextSelected,
+                    ]}
+                  >
+                    {num} {unit}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </>
+  );
+}
+
+const createStyles = (theme: ReturnType<typeof useTheme>) =>
+  StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+    },
+    backButton: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: theme.colors.backgroundCard,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    headerTitle: {
+      fontSize: 19,
+      fontWeight: '800',
+      color: theme.colors.text,
+    },
+    savePill: {
+      backgroundColor: theme.colors.primary,
+      paddingHorizontal: 15,
+      paddingVertical: 8,
+      borderRadius: 18,
+      minWidth: 74,
+      alignItems: 'center',
+    },
+    savePillDisabled: {
+      opacity: 0.5,
+    },
+    savePillText: {
+      fontSize: 13.5,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    container: {
+      flex: 1,
+    },
+    contentContainer: {
+      paddingHorizontal: 16,
+      paddingBottom: 40,
+      gap: 14,
+    },
+    avatarCard: {
+      alignItems: 'center',
+      paddingVertical: 14,
+      gap: 6,
+    },
+    avatarContainer: {
+      position: 'relative',
+      marginBottom: 4,
+    },
+    profileImage: {
+      width: 92,
+      height: 92,
+      borderRadius: 46,
+      borderWidth: 2,
+      borderColor: theme.colors.primary,
+    },
+    profilePlaceholder: {
+      width: 92,
+      height: 92,
+      borderRadius: 46,
+      backgroundColor: theme.colors.primary,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    profilePlaceholderText: {
+      fontSize: 36,
+      fontWeight: '800',
+      color: '#FFFFFF',
+    },
+    cameraOverlay: {
+      position: 'absolute',
+      bottom: 0,
+      right: 0,
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: theme.colors.primary,
+      borderWidth: 2,
+      borderColor: theme.colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    premiumBadgeOverlay: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+    },
+    avatarName: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: theme.colors.text,
+    },
+    changePhotoText: {
+      fontSize: 13.5,
+      fontWeight: '700',
+      color: theme.colors.primary,
+    },
+    photoActionsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      gap: 8,
+      marginTop: 4,
+    },
+    photoActionPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      backgroundColor: theme.colors.backgroundCard,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      paddingHorizontal: 11,
+      paddingVertical: 7,
+      borderRadius: 14,
+    },
+    photoActionText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: theme.colors.primary,
+    },
+    photoRemovePill: {
+      borderColor: 'rgba(239, 68, 68, 0.3)',
+    },
+    photoRemoveText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: theme.colors.error,
+    },
+    mascotHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    mascotSubtitle: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+    },
+    mascotGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'space-between',
+      gap: 10,
+    },
+    mascotTile: {
+      width: '31%',
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 6,
+      borderRadius: 16,
+      backgroundColor: theme.colors.background,
+      borderWidth: 1.5,
+      borderColor: theme.colors.border,
+      gap: 6,
+    },
+    mascotAvatarWrap: {
+      position: 'relative',
+      width: 58,
+      height: 58,
+    },
+    mascotAvatarImg: {
+      width: 58,
+      height: 58,
+      borderRadius: 29,
+    },
+    mascotLoadingOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      borderRadius: 29,
+      backgroundColor: 'rgba(0,0,0,0.35)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    mascotCheckBadge: {
+      position: 'absolute',
+      right: -2,
+      bottom: -2,
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      borderWidth: 2,
+      borderColor: theme.colors.backgroundCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    mascotLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    previewStrip: {
+      flexDirection: 'row',
+      backgroundColor: theme.colors.backgroundCard,
+      borderRadius: 18,
+      paddingVertical: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      alignItems: 'center',
+    },
+    previewTile: {
+      flex: 1,
+      alignItems: 'center',
+      gap: 2,
+    },
+    previewDivider: {
+      width: 1,
+      height: 26,
+      backgroundColor: theme.colors.border,
+    },
+    previewValue: {
+      fontSize: 14.5,
+      fontWeight: '800',
+      color: theme.colors.primary,
+    },
+    previewLabel: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    formCard: {
+      backgroundColor: theme.colors.backgroundCard,
+      borderRadius: 20,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      gap: 12,
+    },
+    cardSectionTitle: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: theme.colors.text,
+    },
+    nameRow: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    formGroup: {
+      gap: 6,
+    },
+    label: {
+      fontSize: 12.5,
+      fontWeight: '700',
+      color: theme.colors.textSecondary,
+    },
+    input: {
+      backgroundColor: theme.colors.background,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 11,
+      fontSize: 15,
+      color: theme.colors.text,
+    },
+    usernameStatus: {
+      marginTop: 2,
+    },
+    statusInline: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    helperText: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+    },
+    successText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: theme.colors.success,
+    },
+    errorText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: theme.colors.error,
+    },
+  });
 
 const createPickerStyles = (theme: any) =>
-    StyleSheet.create({
-        pickerButton: {
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            backgroundColor: theme.colors.backgroundCard,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-            borderRadius: 12,
-            padding: 14,
-        },
-        pickerButtonText: {
-            fontSize: 16,
-            color: theme.colors.text,
-        },
-        pickerButtonIcon: {
-            fontSize: 18,
-        },
-        modalOverlay: {
-            flex: 1,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            justifyContent: 'flex-end',
-        },
-        backdrop: {
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-        },
-        pickerContainer: {
-            backgroundColor: theme.colors.backgroundCard,
-            borderTopLeftRadius: 20,
-            borderTopRightRadius: 20,
-            paddingBottom: Platform.OS === 'ios' ? 40 : 20,
-        },
-        pickerHeader: {
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: 16,
-            borderBottomWidth: 1,
-            borderBottomColor: theme.colors.border,
-        },
-        pickerTitle: {
-            fontSize: 18,
-            fontWeight: '600',
-            color: theme.colors.text,
-        },
-        cancelText: {
-            fontSize: 16,
-            color: theme.colors.textSecondary,
-        },
-        confirmText: {
-            fontSize: 16,
-            color: theme.colors.primary,
-            fontWeight: '700',
-        },
-        datePickerWrapper: {
-            alignItems: 'center',
-            paddingVertical: 10,
-        },
-        numberPickerScroll: {
-            maxHeight: 300,
-        },
-        numberPickerContent: {
-            paddingVertical: 10,
-        },
-        numberItem: {
-            paddingVertical: 12,
-            paddingHorizontal: 20,
-            alignItems: 'center',
-            borderBottomWidth: 1,
-            borderBottomColor: theme.colors.border,
-        },
-        numberItemSelected: {
-            backgroundColor: theme.colors.overlay,
-        },
-        numberText: {
-            fontSize: 18,
-            color: theme.colors.text,
-        },
-        numberTextSelected: {
-            fontSize: 20,
-            fontWeight: '700',
-            color: theme.colors.primary,
-        },
-    });
-
-const createStyles = (theme: any) =>
-    StyleSheet.create({
-        safeArea: {
-            flex: 1,
-            backgroundColor: theme.colors.background,
-        },
-        loadingContainer: {
-            flex: 1,
-            justifyContent: 'center',
-            alignItems: 'center',
-        },
-        loadingText: {
-            fontSize: 16,
-            color: theme.colors.textSecondary,
-        },
-        header: {
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            paddingHorizontal: theme.spacing.lg,
-            paddingVertical: theme.spacing.md,
-            borderBottomWidth: 1,
-            borderBottomColor: theme.colors.border,
-        },
-        backButton: {
-            padding: theme.spacing.xs,
-        },
-        backButtonText: {
-            fontSize: 24,
-            color: theme.colors.primary,
-            fontWeight: '600',
-        },
-        headerTitle: {
-            fontSize: 18,
-            fontWeight: '700',
-            color: theme.colors.text,
-        },
-        saveText: {
-            fontSize: 16,
-            fontWeight: '700',
-            color: theme.colors.primary,
-        },
-        saveTextDisabled: {
-            opacity: 0.5,
-        },
-        container: {
-            flex: 1,
-        },
-        contentContainer: {
-            paddingHorizontal: theme.spacing.lg,
-            paddingTop: theme.spacing.lg,
-            paddingBottom: 40,
-        },
-        profilePictureSection: {
-            alignItems: 'center',
-            marginBottom: theme.spacing.xl,
-        },
-        profileImageContainer: {
-            position: 'relative',
-        },
-        profileImage: {
-            width: 120,
-            height: 120,
-            borderRadius: 60,
-            borderWidth: 3,
-            borderColor: theme.colors.primary,
-        },
-        profilePlaceholder: {
-            width: 120,
-            height: 120,
-            borderRadius: 60,
-            backgroundColor: theme.colors.primary,
-            justifyContent: 'center',
-            alignItems: 'center',
-            borderWidth: 3,
-            borderColor: theme.colors.primary,
-        },
-        profilePlaceholderText: {
-            color: theme.colors.textOnPrimary,
-            fontSize: 48,
-            fontWeight: '700',
-        },
-        premiumBadgeOverlay: {
-            position: 'absolute',
-            bottom: -2,
-            right: -2,
-            backgroundColor: theme.colors.background,
-            borderRadius: 12,
-            padding: 2,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.2,
-            shadowRadius: 4,
-            elevation: 4,
-        },
-        changePhotoButton: {
-            marginTop: theme.spacing.md,
-        },
-        changePhotoText: {
-            color: theme.colors.primary,
-            fontSize: 16,
-            fontWeight: '600',
-        },
-        formGroup: {
-            marginBottom: theme.spacing.md,
-        },
-        label: {
-            fontSize: 14,
-            fontWeight: '600',
-            color: theme.colors.text,
-            marginBottom: theme.spacing.xs,
-        },
-        input: {
-            backgroundColor: theme.colors.backgroundCard,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-            borderRadius: 12,
-            padding: theme.spacing.md,
-            fontSize: 16,
-            color: theme.colors.text,
-        },
-        helperText: {
-            fontSize: 12,
-            color: theme.colors.textSecondary,
-            marginTop: 4,
-        },
-        successText: {
-            fontSize: 12,
-            color: theme.colors.success || '#10b981',
-            marginTop: 4,
-        },
-        errorText: {
-            fontSize: 12,
-            color: theme.colors.error || '#ef4444',
-            marginTop: 4,
-        },
-    });
+  StyleSheet.create({
+    pickerButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: theme.colors.background,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
+    pickerButtonText: {
+      fontSize: 14.5,
+      color: theme.colors.text,
+      fontWeight: '600',
+    },
+    modalOverlay: {
+      flex: 1,
+      justifyContent: 'flex-end',
+      backgroundColor: 'rgba(0,0,0,0.5)',
+    },
+    backdrop: {
+      flex: 1,
+    },
+    pickerContainer: {
+      backgroundColor: theme.colors.backgroundCard,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      paddingBottom: 28,
+      maxHeight: '65%',
+    },
+    pickerHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    pickerTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    cancelText: {
+      fontSize: 15,
+      color: theme.colors.textSecondary,
+    },
+    confirmText: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: theme.colors.primary,
+    },
+    datePickerWrapper: {
+      padding: 12,
+    },
+    numberPickerScroll: {
+      paddingHorizontal: 16,
+    },
+    numberOption: {
+      paddingVertical: 13,
+      paddingHorizontal: 16,
+      borderRadius: 12,
+      marginVertical: 2,
+      alignItems: 'center',
+    },
+    numberOptionSelected: {
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    numberOptionText: {
+      fontSize: 16,
+      color: theme.colors.text,
+    },
+    numberOptionTextSelected: {
+      fontWeight: '800',
+      color: theme.colors.primary,
+    },
+  });

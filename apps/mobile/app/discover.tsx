@@ -63,8 +63,12 @@ export default function DiscoverScreen() {
 
     const toggleSaveMutation = useToggleSave();
 
-    const articles = infiniteData?.pages.flatMap((page) => page.articles || []) || [];
-    const savedArticles = savedData || [];
+    const articles = (infiniteData?.pages.flatMap((page) => page?.articles || []) || []).filter(
+        (item): item is ArticleCardDto => Boolean(item && item.id)
+    );
+    const savedArticles = (Array.isArray(savedData) ? savedData : [])
+        .map((item: any) => (item?.article ? item.article : item))
+        .filter((item): item is ArticleCardDto => Boolean(item && item.id));
     const displayedArticles = activeTab === 'all' ? articles : savedArticles;
     const isLoading = activeTab === 'all' ? articlesLoading : savedLoading;
 
@@ -279,7 +283,7 @@ export default function DiscoverScreen() {
                 <FlatList
                     data={displayedArticles}
                     renderItem={renderArticleItem}
-                    keyExtractor={(item) => item.id}
+                    keyExtractor={(item, index) => item?.id || `article-${index}`}
                     contentContainerStyle={styles.listContent}
                     showsVerticalScrollIndicator={false}
                     refreshControl={

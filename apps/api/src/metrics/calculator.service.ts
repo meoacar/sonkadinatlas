@@ -93,4 +93,118 @@ export class CalculatorService {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     return Math.floor(diffDays / 7);
   }
+
+  /**
+   * Calculate cycle prediction, ovulation, fertile window & current phase
+   */
+  calculateCycleEstimate(params: {
+    lastPeriodDate: string;
+    cycleLength?: number;
+    periodLength?: number;
+  }) {
+    const cycleLength = Math.min(45, Math.max(20, Math.round(params.cycleLength || 28)));
+    const periodLength = Math.min(10, Math.max(2, Math.round(params.periodLength || 5)));
+
+    const lmp = new Date(params.lastPeriodDate);
+    lmp.setHours(0, 0, 0, 0);
+
+    const addDays = (base: Date, days: number) => {
+      const d = new Date(base);
+      d.setDate(d.getDate() + days);
+      return d;
+    };
+
+    const upcomingCycles = [0, 1, 2].map((index) => {
+      const start = addDays(lmp, (index + 1) * cycleLength);
+      const end = addDays(start, periodLength - 1);
+      const ovulation = addDays(start, -14);
+      const fertileStart = addDays(ovulation, -5);
+      const fertileEnd = addDays(ovulation, 1);
+      return {
+        cycleNumber: index + 1,
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        ovulationDate: ovulation.toISOString(),
+        fertileStart: fertileStart.toISOString(),
+        fertileEnd: fertileEnd.toISOString(),
+      };
+    });
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.floor((today.getTime() - lmp.getTime()) / (1000 * 60 * 60 * 24));
+    const currentCycleDay = diffDays >= 0 ? (diffDays % cycleLength) + 1 : 1;
+
+    const ovulationDay = Math.max(7, cycleLength - 14);
+    let currentPhase: 'MENSTRUAL' | 'FOLLICULAR' | 'OVULATION' | 'LUTEAL' = 'FOLLICULAR';
+    if (currentCycleDay <= periodLength) {
+      currentPhase = 'MENSTRUAL';
+    } else if (currentCycleDay >= ovulationDay - 1 && currentCycleDay <= ovulationDay + 1) {
+      currentPhase = 'OVULATION';
+    } else if (currentCycleDay > ovulationDay + 1) {
+      currentPhase = 'LUTEAL';
+    }
+
+    const currentCycleOvulation = addDays(lmp, ovulationDay - 1);
+    const currentFertileStart = addDays(currentCycleOvulation, -5);
+    const currentFertileEnd = addDays(currentCycleOvulation, 1);
+
+    return {
+      cycleLength,
+      periodLength,
+      lastPeriodDate: lmp.toISOString(),
+      currentCycleDay,
+      currentPhase,
+      nextPeriodDate: upcomingCycles[0].startDate,
+      ovulationDate: currentCycleOvulation.toISOString(),
+      fertileWindow: {
+        start: currentFertileStart.toISOString(),
+        end: currentFertileEnd.toISOString(),
+      },
+      upcomingCycles,
+    };
+  }
+
+  /**
+   * Calculate gestational age & trimester from LMP or Due Date
+   */
+  calculatePregnancyEstimate(params: { lmpDate?: string; dueDate?: string }) {
+    const MS_PER_DAY = 1000 * 60 * 60 * 24;
+    let lmp: Date;
+    let due: Date;
+
+    if (params.lmpDate) {
+      lmp = new Date(params.lmpDate);
+      lmp.setHours(0, 0, 0, 0);
+      due = new Date(lmp.getTime() + 280 * MS_PER_DAY);
+    } else if (params.dueDate) {
+      due = new Date(params.dueDate);
+      due.setHours(0, 0, 0, 0);
+      lmp = new Date(due.getTime() - 280 * MS_PER_DAY);
+    } else {
+      lmp = new Date();
+      lmp.setHours(0, 0, 0, 0);
+      due = new Date(lmp.getTime() + 280 * MS_PER_DAY);
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const elapsedDays = Math.max(0, Math.min(294, Math.floor((today.getTime() - lmp.getTime()) / MS_PER_DAY)));
+    const weeks = Math.floor(elapsedDays / 7);
+    const days = elapsedDays % 7;
+    const daysRemaining = Math.max(0, Math.ceil((due.getTime() - today.getTime()) / MS_PER_DAY));
+    const trimester = weeks <= 13 ? 1 : weeks <= 26 ? 2 : 3;
+    const progressPercentage = Math.min(100, Math.max(0, Math.round((elapsedDays / 280) * 100)));
+
+    return {
+      lmpDate: lmp.toISOString(),
+      dueDate: due.toISOString(),
+      weeks,
+      days,
+      totalDays: elapsedDays,
+      daysRemaining,
+      trimester,
+      progressPercentage,
+    };
+  }
 }

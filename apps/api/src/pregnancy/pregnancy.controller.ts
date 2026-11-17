@@ -12,6 +12,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { PregnancyService } from './pregnancy.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { AdminGuard } from '../common/guards/admin.guard';
 
 @Controller('pregnancy')
 @UseGuards(AuthGuard('jwt'))
@@ -342,16 +343,34 @@ export class PregnancyController {
   // ─────────────────────────────────────────────────────────────
 
   @Get('admin/all')
+  @UseGuards(AdminGuard)
   async getAllPregnancies(
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '20',
+    @Query('search') search?: string,
+    @Query('isActive') isActive?: string,
   ) {
-    const parsedPage = parseInt(page, 10);
-    const parsedLimit = parseInt(limit, 10);
+    const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+    const parsedLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
     const skip = (parsedPage - 1) * parsedLimit;
 
-    const [data, total] = await Promise.all([
+    const where: any = {};
+    if (isActive === 'true') where.isActive = true;
+    else if (isActive === 'false') where.isActive = false;
+
+    if (search?.trim()) {
+      const q = search.trim();
+      where.user = {
+        OR: [
+          { email: { contains: q, mode: 'insensitive' } },
+          { username: { contains: q, mode: 'insensitive' } },
+        ],
+      };
+    }
+
+    const [rawData, total, allForStats] = await Promise.all([
       this.pregnancyService['prisma'].pregnancy.findMany({
+        where,
         include: {
           user: {
             select: {
@@ -360,20 +379,66 @@ export class PregnancyController {
               username: true,
             },
           },
+          _count: {
+            select: {
+              kickCounts: true,
+              contractions: true,
+              appointments: true,
+              medications: true,
+              pregnancyNotes: true,
+            },
+          },
         },
         skip,
         take: parsedLimit,
         orderBy: { createdAt: 'desc' },
       }),
-      this.pregnancyService['prisma'].pregnancy.count(),
+      this.pregnancyService['prisma'].pregnancy.count({ where }),
+      this.pregnancyService['prisma'].pregnancy.findMany({
+        select: { isActive: true, lmpDate: true, dueDate: true, weekCache: true, trimester: true },
+      }),
     ]);
 
-    return { data, total, page: parsedPage, limit: parsedLimit };
+    const computeWeekAndTrimester = (p: any) => {
+      const lmp =
+        p.lmpDate ||
+        (p.dueDate ? new Date(new Date(p.dueDate).getTime() - 280 * 24 * 60 * 60 * 1000) : null);
+      if (!lmp) return { week: p.weekCache ?? null, trimester: p.trimester ?? null };
+      const diffDays = Math.max(0, Math.floor((Date.now() - new Date(lmp).getTime()) / (1000 * 60 * 60 * 24)));
+      const week = Math.floor(diffDays / 7);
+      const trimester = week <= 13 ? 1 : week <= 26 ? 2 : 3;
+      return { week, trimester };
+    };
+
+    const data = rawData.map((p) => {
+      const computed = computeWeekAndTrimester(p);
+      return {
+        ...p,
+        weekCache: computed.week ?? p.weekCache,
+        trimester: computed.trimester ?? p.trimester,
+      };
+    });
+
+    const stats = allForStats.reduce(
+      (acc, p) => {
+        const computed = computeWeekAndTrimester(p);
+        acc.total += 1;
+        if (p.isActive) acc.activeCount += 1;
+        if (computed.trimester === 1) acc.trimester1 += 1;
+        else if (computed.trimester === 2) acc.trimester2 += 1;
+        else if (computed.trimester === 3) acc.trimester3 += 1;
+        return acc;
+      },
+      { total: 0, activeCount: 0, trimester1: 0, trimester2: 0, trimester3: 0 },
+    );
+
+    return { data, total, page: parsedPage, limit: parsedLimit, stats };
   }
 
   @Get('admin/:id')
+  @UseGuards(AdminGuard)
   async getPregnancyById(@Param('id') id: string) {
-    return this.pregnancyService['prisma'].pregnancy.findUnique({
+    const record = await this.pregnancyService['prisma'].pregnancy.findUnique({
       where: { id },
       include: {
         user: {
@@ -383,11 +448,31 @@ export class PregnancyController {
             username: true,
           },
         },
-        kickCounts: { orderBy: { sessionDate: 'desc' }, take: 10 },
-        contractions: { orderBy: { startTime: 'desc' }, take: 10 },
+        kickCounts: { orderBy: { sessionDate: 'desc' }, take: 20 },
+        contractions: { orderBy: { startTime: 'desc' }, take: 20 },
         appointments: { orderBy: { appointmentAt: 'desc' } },
-        medications: true,
+        medications: { orderBy: { createdAt: 'desc' } },
+        pregnancyNotes: { orderBy: { createdAt: 'desc' }, take: 20 },
+        birthPlan: true,
+        hospitalBagItems: { orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }] },
       },
     });
+
+    if (!record) return null;
+
+    const lmp =
+      record.lmpDate ||
+      (record.dueDate ? new Date(new Date(record.dueDate).getTime() - 280 * 24 * 60 * 60 * 1000) : null);
+    if (lmp) {
+      const diffDays = Math.max(0, Math.floor((Date.now() - new Date(lmp).getTime()) / (1000 * 60 * 60 * 24)));
+      const week = Math.floor(diffDays / 7);
+      return {
+        ...record,
+        weekCache: week,
+        trimester: week <= 13 ? 1 : week <= 26 ? 2 : 3,
+      };
+    }
+
+    return record;
   }
 }

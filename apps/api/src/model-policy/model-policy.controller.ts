@@ -11,9 +11,10 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ModelPolicyService } from './model-policy.service';
+import { AdminGuard } from '../common/guards/admin.guard';
 
 @Controller('model-policies')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), AdminGuard)
 export class ModelPolicyController {
   constructor(private readonly modelPolicyService: ModelPolicyService) {}
 
@@ -42,7 +43,7 @@ export class ModelPolicyController {
     @Body()
     data: {
       plan: 'free' | 'premium';
-      provider: 'openai' | 'anthropic' | 'google';
+      provider: 'openai' | 'anthropic' | 'google' | 'deepseek';
       modelName: string;
       temperature: number;
       maxTokens: number;
@@ -58,7 +59,7 @@ export class ModelPolicyController {
     @Body()
     data: {
       plan?: 'free' | 'premium';
-      provider?: 'openai' | 'anthropic' | 'google';
+      provider?: 'openai' | 'anthropic' | 'google' | 'deepseek';
       modelName?: string;
       temperature?: number;
       maxTokens?: number;

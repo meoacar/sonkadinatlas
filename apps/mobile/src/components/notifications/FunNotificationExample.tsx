@@ -24,6 +24,7 @@ import { useFunNotifications } from '@/hooks/useFunNotifications';
 interface FunNotificationExampleProps {
     streakDay?: number;
     dataEntryCount?: number;
+    cycleDay?: number;
     isPeriodWeek?: boolean;
     lastDataEntryHours?: number;
     autoShow?: boolean;

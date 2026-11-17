@@ -1,6 +1,7 @@
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from '@/hooks/useTheme';
 import { gamificationService } from '@/services/gamification';
@@ -24,7 +25,7 @@ export function GamificationCard() {
 
     return (
         <TouchableOpacity
-            activeOpacity={0.8}
+            activeOpacity={0.85}
             onPress={() => router.push('/gamification' as any)}
         >
             <LinearGradient
@@ -36,22 +37,24 @@ export function GamificationCard() {
                 <View style={styles.row}>
                     <View style={styles.left}>
                         <View style={styles.titleRow}>
-                            <Text style={styles.icon}>🎮</Text>
-                            <Text style={styles.title}>Başarılarım</Text>
+                            <Ionicons name="trophy" size={18} color="#FDE047" style={{ marginRight: 7 }} />
+                            <Text style={styles.title}>Başarılarım & İçgörüler</Text>
                         </View>
                         <View style={styles.stats}>
                             <Text style={styles.statText}>Seviye {stats.level}</Text>
                             <Text style={styles.dot}>•</Text>
-                            <Text style={styles.statText}>🔥 {stats.currentStreak}</Text>
+                            <Ionicons name="flame" size={13} color="#FDBA74" style={{ marginRight: 3 }} />
+                            <Text style={styles.statText}>{stats.currentStreak} gün</Text>
                             <Text style={styles.dot}>•</Text>
-                            <Text style={styles.statText}>🏆 {stats.achievements}</Text>
+                            <Ionicons name="ribbon" size={13} color="#FDE047" style={{ marginRight: 3 }} />
+                            <Text style={styles.statText}>{stats.achievements} rozet</Text>
                         </View>
                     </View>
-                    <Text style={styles.arrow}>›</Text>
+                    <Ionicons name="chevron-forward" size={20} color="#FFFFFF" style={{ opacity: 0.85 }} />
                 </View>
 
                 <View style={styles.xpBar}>
-                    <View style={[styles.xpProgress, { width: `${Math.min(stats.levelProgress, 100)}%` }]} />
+                    <View style={[styles.xpProgress, { width: `${Math.min(Math.max(stats.levelProgress, 4), 100)}%` }]} />
                 </View>
                 <Text style={styles.xpText}>
                     {stats.xpProgress} / {stats.xpTotal} XP

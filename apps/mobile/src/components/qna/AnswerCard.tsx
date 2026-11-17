@@ -41,10 +41,11 @@ export function AnswerCard({
     const styles = createStyles(theme);
     const { user } = useAuthStore();
     const [showComments, setShowComments] = useState(false);
+    const [justOpenedComments, setJustOpenedComments] = useState(false);
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(20)).current;
 
-    const commentCount = comments.length || answer._count?.comments || 0;
+    const commentCount = Math.max(comments.length, answer._count?.comments || 0);
     const isOwnAnswer = user?.id === answer.userId;
 
     // Fade in and slide up animation on mount
@@ -80,11 +81,10 @@ export function AnswerCard({
 
     const handleToggleComments = () => {
         haptics.selection();
-        setShowComments(!showComments);
+        const next = !showComments;
+        setShowComments(next);
+        setJustOpenedComments(next);
     };
-
-    const accessibilityLabel = `${answer.user?.displayName} tarafından verilen cevap. ${answer.isBestAnswer ? accessibility.getBestAnswerLabel() : ''
-        }. ${accessibility.getVoteCountLabel(answer.voteCount)}. ${commentCount} yorum.`;
 
     return (
         <Animated.View
@@ -95,8 +95,6 @@ export function AnswerCard({
         >
             <View
                 style={[styles.container, answer.isBestAnswer && styles.bestAnswerContainer]}
-                accessible={true}
-                accessibilityLabel={accessibilityLabel}
             >
                 {/* Best Answer Badge */}
                 {answer.isBestAnswer && (
@@ -139,7 +137,7 @@ export function AnswerCard({
                         currentVote={answer.userVote || null}
                         voteCount={answer.voteCount}
                         onVote={onVote}
-                        disabled={isOwnAnswer}
+                        isOwnAnswer={isOwnAnswer}
                     />
 
                     {isOwnAnswer && (
@@ -149,7 +147,7 @@ export function AnswerCard({
                     )}
 
                     <TouchableOpacity
-                        style={styles.actionButton}
+                        style={[styles.actionButton, showComments && styles.actionButtonActive]}
                         onPress={handleToggleComments}
                         activeOpacity={0.7}
                         accessible={true}
@@ -157,8 +155,12 @@ export function AnswerCard({
                         accessibilityLabel={`Yorumlar, ${commentCount} yorum`}
                         accessibilityHint={accessibility.getButtonHint('Yorumları görüntüle')}
                     >
-                        <Text style={{ fontSize: 16 }}>💬</Text>
-                        <Text style={styles.actionText}>
+                        <Ionicons
+                            name={showComments ? 'chatbubble' : 'chatbubble-outline'}
+                            size={15}
+                            color={showComments ? theme.colors.primary : theme.colors.textSecondary}
+                        />
+                        <Text style={[styles.actionText, showComments && styles.actionTextActive]}>
                             {commentCount > 0 ? `${commentCount} yorum` : 'Yorum yap'}
                         </Text>
                     </TouchableOpacity>
@@ -173,7 +175,7 @@ export function AnswerCard({
                             accessibilityLabel="Cevabı paylaş"
                             accessibilityHint={accessibility.getButtonHint('Cevabı paylaş')}
                         >
-                            <Text style={{ fontSize: 16 }}>↗️</Text>
+                            <Ionicons name="share-outline" size={16} color={theme.colors.textSecondary} />
                             <Text style={styles.actionText}>Paylaş</Text>
                         </TouchableOpacity>
                     )}
@@ -188,7 +190,7 @@ export function AnswerCard({
                             accessibilityLabel="Cevabı bildir"
                             accessibilityHint={accessibility.getButtonHint('Cevabı bildir')}
                         >
-                            <Text style={{ fontSize: 16 }}>🚩</Text>
+                            <Ionicons name="flag-outline" size={15} color="#ef4444" />
                             <Text style={[styles.actionText, styles.reportText]}>Bildir</Text>
                         </TouchableOpacity>
                     )}
@@ -203,14 +205,14 @@ export function AnswerCard({
                             accessibilityLabel="En iyi cevap olarak işaretle"
                             accessibilityHint={accessibility.getButtonHint('Bu cevabı en iyi cevap olarak işaretle')}
                         >
-                            <Text style={{ fontSize: 16 }}>✅</Text>
+                            <Ionicons name="checkmark-circle-outline" size={16} color={theme.colors.success} />
                             <Text style={styles.markBestText}>En iyi cevap seç</Text>
                         </TouchableOpacity>
                     )}
 
                     {isQuestionAuthor && answer.isBestAnswer && (
                         <View style={styles.bestAnswerIndicator}>
-                            <Text style={{ fontSize: 16 }}>✅</Text>
+                            <Ionicons name="checkmark-circle" size={16} color={theme.colors.success} />
                             <Text style={styles.bestAnswerIndicatorText}>Seçtiğiniz en iyi cevap</Text>
                         </View>
                     )}
@@ -228,7 +230,7 @@ export function AnswerCard({
                                 }}
                             />
                         ) : (
-                            <Text style={styles.noCommentsText}>Henüz yorum yok</Text>
+                            <Text style={styles.noCommentsText}>Henüz yorum yok. İlk yorumu yaz!</Text>
                         )}
                         {onSubmitComment && (
                             <View style={styles.commentInputWrapper}>
@@ -236,6 +238,7 @@ export function AnswerCard({
                                     onSubmit={onSubmitComment}
                                     isSubmitting={isSubmittingComment}
                                     placeholder="Cevaba yorum yap..."
+                                    autoFocus={justOpenedComments}
                                 />
                             </View>
                         )}
@@ -357,11 +360,21 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
             paddingVertical: 8,
             borderRadius: 12,
             backgroundColor: theme.colors.background,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+        },
+        actionButtonActive: {
+            backgroundColor: 'rgba(139, 92, 246, 0.12)',
+            borderColor: theme.colors.primary,
         },
         actionText: {
             fontSize: 13,
             color: theme.colors.textSecondary,
             fontWeight: '500',
+        },
+        actionTextActive: {
+            color: theme.colors.primary,
+            fontWeight: '600',
         },
         markBestButton: {
             flexDirection: 'row',

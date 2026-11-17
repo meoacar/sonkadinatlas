@@ -1,5 +1,5 @@
 import { IsString, IsNotEmpty, IsEnum, IsArray, IsBoolean, IsOptional, MaxLength, MinLength, ArrayMaxSize } from 'class-validator';
-import { QuestionCategory } from '@prisma/client';
+import { QuestionCategory, QuestionStatus } from '@prisma/client';
 
 export class CreateQuestionDto {
     @IsString()
@@ -26,4 +26,14 @@ export class CreateQuestionDto {
     @IsBoolean()
     @IsOptional()
     isAnonymous?: boolean;
+}
+
+export class AdminCreateQuestionDto extends CreateQuestionDto {
+    @IsEnum(QuestionStatus, { message: 'Geçersiz durum' })
+    @IsOptional()
+    status?: QuestionStatus;
+
+    @IsBoolean()
+    @IsOptional()
+    isPremium?: boolean;
 }

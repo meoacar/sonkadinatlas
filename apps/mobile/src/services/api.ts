@@ -8,16 +8,23 @@ import type {
   UsageStats,
   PurchaseRequest,
   RestoreRequest,
+  PremiumPaywallConfig,
 } from '@/types/subscription';
-import { authEvents } from './authEvents';
-
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+import { authEvents, type AuthEventPayload } from './authEvents';
+import { getApiBaseUrl } from '@/utils/apiBaseUrl';
 
 class ApiClient {
-  private baseURL: string;
+  private get baseURL(): string {
+    return getApiBaseUrl();
+  }
 
-  constructor(baseURL: string) {
-    this.baseURL = baseURL;
+  private async clearLocalAuth(payload?: AuthEventPayload): Promise<void> {
+    await SecureStore.deleteItemAsync('accessToken');
+    await SecureStore.deleteItemAsync('refreshToken');
+    await SecureStore.deleteItemAsync('user');
+    await SecureStore.deleteItemAsync('pinVerified');
+    await SecureStore.deleteItemAsync('pinEnabled');
+    authEvents.emit(payload);
   }
 
   private async request<T>(
@@ -49,11 +56,26 @@ class ApiClient {
       },
     });
 
+    // Immediately terminate session if account is suspended or deleted
+    if (includeAuth && (response.status === 403 || response.status === 401)) {
+      const cloned = response.clone();
+      const bodyErr = await cloned.json().catch(() => ({}));
+      if (bodyErr?.code === 'ACCOUNT_SUSPENDED' || bodyErr?.code === 'ACCOUNT_DELETED') {
+        const msg =
+          bodyErr.message ||
+          (bodyErr.code === 'ACCOUNT_SUSPENDED'
+            ? 'Hesabınız yönetici tarafından askıya alınmıştır.'
+            : 'Hesabınız kapatılmış veya silinmiştir.');
+        await this.clearLocalAuth({ reason: bodyErr.code, message: msg });
+        throw new Error(msg);
+      }
+    }
+
     // Only attempt token refresh for authenticated endpoints
     if (response.status === 401 && includeAuth) {
       // Token expired, try to refresh
-      const refreshed = await this.refreshToken();
-      if (refreshed) {
+      const refreshResult = await this.refreshToken();
+      if (refreshResult.ok) {
         // Retry request with new token
         const retryHeaders: HeadersInit = {};
         const newToken = await SecureStore.getItemAsync('accessToken');
@@ -73,23 +95,34 @@ class ApiClient {
         });
         if (!retryResponse.ok) {
           const error = await retryResponse.json().catch(() => ({}));
+          if (
+            retryResponse.status === 401 ||
+            error?.code === 'ACCOUNT_SUSPENDED' ||
+            error?.code === 'ACCOUNT_DELETED'
+          ) {
+            await this.clearLocalAuth({
+              reason: error?.code || 'SESSION_EXPIRED',
+              message: error?.message,
+            });
+          }
           throw new Error(error.message || `HTTP ${retryResponse.status}`);
         }
         return retryResponse.json();
       } else {
-        // Refresh failed, clear auth and cache to prevent data leakage
-        await SecureStore.deleteItemAsync('accessToken');
-        await SecureStore.deleteItemAsync('refreshToken');
-        await SecureStore.deleteItemAsync('user');
-        // Emit auth cleared event so authStore can update
-        authEvents.emit();
-        throw new Error('Oturum süresi doldu. Lütfen tekrar giriş yapın.');
+        const reason = refreshResult.code || 'SESSION_EXPIRED';
+        const message =
+          refreshResult.message || 'Oturum süresi doldu. Lütfen tekrar giriş yapın.';
+        await this.clearLocalAuth({ reason, message });
+        throw new Error(message);
       }
     }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || `HTTP ${response.status}`);
+      const err: any = new Error(error.message || `HTTP ${response.status}`);
+      err.status = response.status;
+      err.code = error.code;
+      throw err;
     }
 
     return response.json();
@@ -125,30 +158,43 @@ class ApiClient {
     return this.request<T>(endpoint, { method: 'DELETE' }, includeAuth);
   }
 
-  private async refreshToken(): Promise<boolean> {
+  private async refreshToken(): Promise<{
+    ok: boolean;
+    code?: 'ACCOUNT_SUSPENDED' | 'ACCOUNT_DELETED' | 'SESSION_EXPIRED';
+    message?: string;
+  }> {
     try {
       const refreshToken = await SecureStore.getItemAsync('refreshToken');
-      if (!refreshToken) return false;
+      if (!refreshToken) return { ok: false, code: 'SESSION_EXPIRED' };
 
-      const response = await this.post<AuthTokens>(
-        '/auth/refresh',
-        { refreshToken },
-        false,
-      );
+      const response = await fetch(`${this.baseURL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
 
-      await SecureStore.setItemAsync('accessToken', response.accessToken);
-      await SecureStore.setItemAsync('refreshToken', response.refreshToken);
-      // Emit token refreshed event so authStore can update
-      authEvents.emit();
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        return {
+          ok: false,
+          code: err?.code,
+          message: err?.message,
+        };
+      }
 
-      return true;
-    } catch (error) {
-      return false;
+      const tokens: AuthTokens = await response.json();
+      await SecureStore.setItemAsync('accessToken', tokens.accessToken);
+      await SecureStore.setItemAsync('refreshToken', tokens.refreshToken);
+      authEvents.emit({ reason: 'REFRESHED' });
+
+      return { ok: true };
+    } catch {
+      return { ok: false, code: 'SESSION_EXPIRED' };
     }
   }
 }
 
-export const api = new ApiClient(API_BASE_URL);
+export const api = new ApiClient();
 
 // Auth endpoints
 export const authService = {
@@ -177,6 +223,21 @@ export const authService = {
     api.get<{ isValid: boolean }>(`/auth/verify-reset-token?token=${token}`, false),
 };
 
+export const publicSupportService = {
+  submitTicket: (data: {
+    name: string;
+    email: string;
+    category?: string;
+    subject: string;
+    message: string;
+  }) =>
+    api.post<{ success: boolean; id: string; ticketCode?: string; createdAt: string }>(
+      '/support/public/contact',
+      data,
+      false,
+    ),
+};
+
 // User endpoints
 export const userService = {
   getMe: () => api.get('/me'),
@@ -185,6 +246,23 @@ export const userService = {
   checkUsernameAvailability: (username: string) => api.get(`/users/check-username?username=${encodeURIComponent(username)}`, false),
   deleteMe: () => api.delete('/me'),
   exportMyData: () => api.get('/me/export'),
+  getRetentionOffer: () =>
+    api.get<{
+      banner: {
+        id: string;
+        ruleId: string;
+        title: string;
+        body: string;
+        incentive: 'none' | 'trial_offer' | 'nova_bonus' | 'quick_checkin';
+        ctaScreen: 'home' | 'calendar' | 'chat' | 'premium';
+        createdAt: string;
+      } | null;
+    }>('/me/retention-offer'),
+  ackRetentionOffer: (action: 'dismiss' | 'claim') =>
+    api.post<{ success: boolean; action: string; bonusGranted: number }>(
+      '/me/retention-offer/ack',
+      { action },
+    ),
 
   uploadProfilePicture: async (fileUri: string): Promise<{ profilePictureUrl: string }> => {
     const token = await SecureStore.getItemAsync('accessToken');
@@ -207,7 +285,7 @@ export const userService = {
 
     // Upload with multipart/form-data
     // Note: Don't set Content-Type header - it will be set automatically with boundary
-    const response = await fetch(`${API_BASE_URL}/me/profile-picture`, {
+    const response = await fetch(`${getApiBaseUrl()}/me/profile-picture`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -247,6 +325,8 @@ export const userService = {
 // Metrics endpoints
 export const metricsService = {
   getMetrics: () => api.get('/metrics'),
+
+  getHealthReport: (days: number = 30) => api.get<any>(`/metrics/health-report?days=${days}`),
 
   calculateBMI: (data: { heightCm: number; weightKg: number }) =>
     api.post('/metrics/bmi', data),
@@ -339,7 +419,7 @@ export const chatService = {
 
   // SSE streaming handled separately in component
   streamUrl: (conversationId: string) =>
-    `${API_BASE_URL}/chat/${conversationId}/stream`,
+    `${getApiBaseUrl()}/chat/${conversationId}/stream`,
 };
 
 // Quota endpoints
@@ -388,6 +468,40 @@ export const cyclesService = {
 
   getStats: () => api.get('/cycles/stats'),
 
+  getPatternInsights: () =>
+    api.get<{
+      totalLogsAnalyzed: number;
+      cycleHistory: Array<{
+        startDate: string;
+        cycleLength: number;
+        periodLength: number | null;
+      }>;
+      upcoming3Cycles: Array<{
+        cycleNumber: number;
+        startDate: string;
+        endDate: string;
+        ovulationDate: string;
+        fertileStart: string;
+        fertileEnd: string;
+      }>;
+      topPrePeriodSymptoms: Array<{ name: string; count: number }>;
+      topSymptoms: Array<{ name: string; count: number }>;
+      topMoods: Array<{ name: string; count: number }>;
+      sleepCrampCorrelation: {
+        avgGoodSleepCramps: number | null;
+        avgLowSleepCramps: number | null;
+        sampleCount: number;
+      };
+      avgWaterMl: number;
+      insights: Array<{
+        id: string;
+        icon: string;
+        title: string;
+        description: string;
+        tone: 'pink' | 'purple' | 'teal' | 'amber';
+      }>;
+    }>('/cycles/insights/patterns'),
+
   // Daily Log endpoints
   upsertDailyLog: (data: {
     date: string;
@@ -422,7 +536,7 @@ export const pregnancyService = {
     anonymousMode?: boolean;
   }) => api.post('/pregnancy', data),
 
-  get: () => api.get('/pregnancy'),
+  get: () => api.get<any>('/pregnancy'),
 
   getSummary: () => api.get<{
     gestationalAge: { weeks: number; days: number };
@@ -442,7 +556,7 @@ export const pregnancyService = {
   }) => api.post('/pregnancy/kicks', data),
 
   getKicks: (limit?: number) =>
-    api.get(`/pregnancy/kicks${limit ? `?limit=${limit}` : ''}`),
+    api.get<any[]>(`/pregnancy/kicks${limit ? `?limit=${limit}` : ''}`),
 
   deleteKick: (id: string) => api.delete(`/pregnancy/kicks/${id}`),
 
@@ -456,9 +570,9 @@ export const pregnancyService = {
   }) => api.post('/pregnancy/contractions', data),
 
   getContractions: (hours?: number) =>
-    api.get(`/pregnancy/contractions${hours ? `?hours=${hours}` : ''}`),
+    api.get<any[]>(`/pregnancy/contractions${hours ? `?hours=${hours}` : ''}`),
 
-  getContractionsSummary: () => api.get('/pregnancy/contractions/summary'),
+  getContractionsSummary: () => api.get<any>('/pregnancy/contractions/summary'),
 
   deleteContraction: (id: string) => api.delete(`/pregnancy/contractions/${id}`),
 
@@ -473,9 +587,9 @@ export const pregnancyService = {
     vitals?: any;
   }) => api.post('/pregnancy/appointments', data),
 
-  getAppointments: () => api.get('/pregnancy/appointments'),
+  getAppointments: () => api.get<any[]>('/pregnancy/appointments'),
 
-  getAppointment: (id: string) => api.get(`/pregnancy/appointments/${id}`),
+  getAppointment: (id: string) => api.get<any>(`/pregnancy/appointments/${id}`),
 
   updateAppointment: (id: string, data: any) =>
     api.patch(`/pregnancy/appointments/${id}`, data),
@@ -493,7 +607,7 @@ export const pregnancyService = {
     endDate?: string;
   }) => api.post('/pregnancy/medications', data),
 
-  getMedications: () => api.get('/pregnancy/medications'),
+  getMedications: () => api.get<any[]>('/pregnancy/medications'),
 
   updateMedication: (id: string, data: any) =>
     api.patch(`/pregnancy/medications/${id}`, data),
@@ -504,7 +618,7 @@ export const pregnancyService = {
   createOrUpdateBirthPlan: (content: any) =>
     api.post('/pregnancy/birth-plan', { content }),
 
-  getBirthPlan: () => api.get('/pregnancy/birth-plan'),
+  getBirthPlan: () => api.get<any>('/pregnancy/birth-plan'),
 
   deleteBirthPlan: () => api.delete('/pregnancy/birth-plan'),
 
@@ -515,7 +629,7 @@ export const pregnancyService = {
     sortOrder?: number;
   }) => api.post('/pregnancy/hospital-bag', data),
 
-  getHospitalBagItems: () => api.get('/pregnancy/hospital-bag'),
+  getHospitalBagItems: () => api.get<any[]>('/pregnancy/hospital-bag'),
 
   updateHospitalBagItem: (id: string, data: any) =>
     api.patch(`/pregnancy/hospital-bag/${id}`, data),
@@ -526,7 +640,7 @@ export const pregnancyService = {
   createNote: (data: { title?: string; content: string; tags?: string[] }) =>
     api.post('/pregnancy/notes', data),
 
-  getNotes: () => api.get('/pregnancy/notes'),
+  getNotes: () => api.get<any[]>('/pregnancy/notes'),
 
   getNote: (id: string) => api.get(`/pregnancy/notes/${id}`),
 
@@ -579,6 +693,57 @@ export const remindersService = {
     api.post('/reminders/push/register', { pushToken }),
 
   testPush: () => api.post('/reminders/push/test', {}),
+
+  getPeriodSupportMessages: () =>
+    api.get<{
+      enabled: boolean;
+      defaultSendHours: number[];
+      maxPerDay: number;
+      periodWindowDays: number;
+      messages: Array<{
+        id: string;
+        titleTr: string;
+        titleEn: string;
+        messageTr: string;
+        messageEn: string;
+        emoji: string;
+        tone: string;
+        dayRange: 'all' | 'early_heavy' | 'mid_late';
+        active: boolean;
+        order: number;
+      }>;
+      updatedAt: string;
+    }>('/period-notifications/active'),
+};
+
+export const partnerService = {
+  createInvite: () =>
+    api.post<{ code: string; expiresAt: string; message: string }>('/partner/invite', {}),
+  acceptInvite: (code: string) =>
+    api.post<{ connected: boolean; link: any }>('/partner/accept', { code }),
+  getStatus: () =>
+    api.get<{
+      connected: boolean;
+      link: {
+        partnerUserId: string;
+        partnerDisplayName: string;
+        role: 'owner' | 'partner';
+        connectedAt: string;
+      } | null;
+      partnerSummary: {
+        ownerDisplayName: string;
+        cycleDay: number | null;
+        phaseTitle: string;
+        daysUntilNextPeriod: number | null;
+        supportTip: string;
+        privacyNote: string;
+      } | null;
+    }>('/partner/status'),
+  unlink: () => api.delete<{ connected: boolean }>('/partner/link'),
+};
+
+export const featureFlagsService = {
+  getPublicFlags: () => api.get<Record<string, any>>('/feature-flags/public'),
 };
 
 // Home endpoints
@@ -596,6 +761,15 @@ export const homeService = {
       };
       todaySnapshot: {
         cycleDay?: number;
+        cyclePhase?: {
+          phase: 'MENSTRUAL' | 'FOLLICULAR' | 'OVULATION' | 'LUTEAL';
+          title: string;
+          summary: string;
+          nutritionTip: string;
+          exerciseTip: string;
+          novaPrompt: string;
+          color: string;
+        };
         nextPeriodEstimate?: {
           date: string;
           confidence: 'low' | 'medium' | 'high';
@@ -616,6 +790,7 @@ export const homeService = {
           logs: number;
         };
         remindersToday: number;
+        dataEntriesCount?: number;
       };
       wellnessTiles?: {
         steps: {
@@ -680,10 +855,10 @@ export const wellnessService = {
     const params = new URLSearchParams();
     if (from) params.append('from', from);
     if (to) params.append('to', to);
-    return api.get(`/wellness/v1/steps${params.toString() ? `?${params.toString()}` : ''}`);
+    return api.get<any[]>(`/wellness/v1/steps${params.toString() ? `?${params.toString()}` : ''}`);
   },
 
-  getTodaySteps: () => api.get('/wellness/v1/steps/today'),
+  getTodaySteps: () => api.get<any>('/wellness/v1/steps/today'),
 
   logSteps: (data: { date: string; count: number; source?: string; isManual?: boolean }) =>
     api.post('/wellness/v1/steps', data),
@@ -695,10 +870,10 @@ export const wellnessService = {
     const params = new URLSearchParams();
     if (from) params.append('from', from);
     if (to) params.append('to', to);
-    return api.get(`/wellness/v1/meditation${params.toString() ? `?${params.toString()}` : ''}`);
+    return api.get<any[]>(`/wellness/v1/meditation${params.toString() ? `?${params.toString()}` : ''}`);
   },
 
-  getTodayMeditation: () => api.get('/wellness/v1/meditation/today'),
+  getTodayMeditation: () => api.get<any>('/wellness/v1/meditation/today'),
 
   logMeditation: (data: {
     date: string;
@@ -715,7 +890,7 @@ export const wellnessService = {
     const params = new URLSearchParams();
     if (from) params.append('from', from);
     if (to) params.append('to', to);
-    return api.get(`/wellness/v1/sleep${params.toString() ? `?${params.toString()}` : ''}`);
+    return api.get<any[]>(`/wellness/v1/sleep${params.toString() ? `?${params.toString()}` : ''}`);
   },
 
   getLastNightSleep: () => api.get('/wellness/v1/sleep/last-night'),
@@ -910,6 +1085,14 @@ export const subscriptionService = {
   // Get usage stats
   getUsageStats: () =>
     api.get<UsageStats>('/subscription/usage-stats'),
+
+  // Get live paywall config
+  getPaywallConfig: () =>
+    api.get<PremiumPaywallConfig>('/subscription/paywall-config'),
+
+  // Get live paywall config for unauthenticated onboarding
+  getPublicPaywallConfig: () =>
+    api.get<PremiumPaywallConfig>('/subscription/public/paywall-config', false),
 };
 
 import type {

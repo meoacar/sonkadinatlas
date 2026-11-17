@@ -87,10 +87,10 @@ export function useQnaNotificationListener() {
     useEffect(() => {
         // Listen for notifications received while app is foregrounded
         const subscription = Notifications.addNotificationReceivedListener((notification) => {
-            const data = notification.request.content.data;
+            const data = notification.request.content.data as Record<string, any>;
 
             // Check if it's a QnA notification
-            if (data?.type && Object.values(QnaNotificationType).includes(data.type)) {
+            if (data?.type && Object.values(QnaNotificationType).includes(data.type as QnaNotificationType)) {
                 const notificationType = data.type as QnaNotificationType;
 
                 // Check if we should show this notification
@@ -114,10 +114,10 @@ export function useQnaNotificationResponse(
 
     useEffect(() => {
         const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-            const data = response.notification.request.content.data;
+            const data = response.notification.request.content.data as Record<string, any>;
 
             // Check if it's a QnA notification
-            if (data?.type && Object.values(QnaNotificationType).includes(data.type)) {
+            if (data?.type && Object.values(QnaNotificationType).includes(data.type as QnaNotificationType)) {
                 const notificationType = data.type as QnaNotificationType;
 
                 // Decrement unread count

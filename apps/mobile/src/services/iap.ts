@@ -378,7 +378,7 @@ class IAPManager {
             // The actual purchase will be received through purchaseUpdatedListener
             await requestPurchase({
                 skus: [product.id],
-            });
+            } as any);
 
             console.log('[IAP] Purchase request sent successfully');
             console.log('[IAP] Waiting for purchase result through listener...');

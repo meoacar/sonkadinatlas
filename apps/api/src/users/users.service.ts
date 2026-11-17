@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { SubscriptionStatus, SubscriptionTier } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -225,29 +226,93 @@ export class UsersService {
   }
 
   async getUserById(userId: string) {
-    return this.getUserWithProfile(userId);
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        profile: true,
+        subscription: true,
+        usageQuota: true,
+        pregnancy: {
+          select: {
+            id: true,
+            isActive: true,
+            weekCache: true,
+            trimester: true,
+            dueDate: true,
+          },
+        },
+        _count: {
+          select: {
+            periodCycles: true,
+            dailyLogs: true,
+            waterLogs: true,
+            dailySteps: true,
+            sleepLogs: true,
+            meditationSessions: true,
+            healthMetrics: true,
+            reminders: true,
+            conversations: true,
+            questions: true,
+            answers: true,
+            articleInteractions: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      return null;
+    }
+
+    const [waterAgg, stepsAgg, sleepAgg, meditationAgg] = await Promise.all([
+      this.prisma.waterLog.aggregate({ where: { userId }, _sum: { amountMl: true } }),
+      this.prisma.dailySteps.aggregate({ where: { userId }, _sum: { count: true } }),
+      this.prisma.sleepLog.aggregate({ where: { userId }, _sum: { durationMin: true } }),
+      this.prisma.meditationSession.aggregate({ where: { userId }, _sum: { durationMin: true } }),
+    ]);
+
+    const { password, pinHash, ...userWithoutSensitive } = user;
+    return {
+      ...userWithoutSensitive,
+      wellnessTotals: {
+        totalWaterMl: waterAgg._sum.amountMl || 0,
+        totalSteps: stepsAgg._sum.count || 0,
+        totalSleepHours: Math.round(((sleepAgg._sum.durationMin || 0) / 60) * 10) / 10,
+        totalMeditationMin: meditationAgg._sum.durationMin || 0,
+      },
+    };
   }
 
   async updateUser(userId: string, data: any) {
+    const existingTarget = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { profile: true },
+    });
+
+    if (!existingTarget) {
+      throw new NotFoundException('Kullanıcı bulunamadı');
+    }
+
     const updateData: any = {};
     const profileData: any = {};
 
     // Check for email uniqueness if email is being updated
-    if (data.email) {
+    if (data.email && data.email.trim()) {
+      const cleanEmail = data.email.trim().toLowerCase();
       const existingUser = await this.prisma.user.findUnique({
-        where: { email: data.email },
+        where: { email: cleanEmail },
       });
 
       if (existingUser && existingUser.id !== userId) {
         throw new ConflictException('Bu e-posta adresi zaten kullanılıyor');
       }
 
-      updateData.email = data.email;
+      updateData.email = cleanEmail;
     }
 
     // Check for username uniqueness if username is being updated
-    if (data.username !== undefined && data.username !== null && data.username !== '') {
-      const normalizedUsername = data.username.toLowerCase();
+    if (data.username !== undefined && data.username !== null && String(data.username).trim() !== '') {
+      const normalizedUsername = String(data.username).trim().toLowerCase();
 
       // Validate username format
       if (!/^[a-z0-9._]+$/.test(normalizedUsername)) {
@@ -271,9 +336,9 @@ export class UsersService {
 
     // User fields
     if (data.status) updateData.status = data.status;
-    if (data.isAdmin !== undefined) updateData.isAdmin = data.isAdmin;
+    if (data.isAdmin !== undefined) updateData.isAdmin = Boolean(data.isAdmin);
     if (data.pinEnabled !== undefined) {
-      updateData.pinEnabled = data.pinEnabled;
+      updateData.pinEnabled = Boolean(data.pinEnabled);
       // If disabling PIN, also clear the PIN hash
       if (data.pinEnabled === false) {
         updateData.pinHash = null;
@@ -281,19 +346,18 @@ export class UsersService {
     }
 
     // Handle password change (admin can set new password)
-    if (data.newPassword) {
-      // Validate password
-      if (data.newPassword.length < 6) {
+    if (data.newPassword && String(data.newPassword).trim().length > 0) {
+      const newPwd = String(data.newPassword).trim();
+      if (newPwd.length < 6) {
         throw new BadRequestException('Şifre en az 6 karakter olmalıdır');
       }
 
-      // Check if passwords match (if confirmPassword is provided)
-      if (data.confirmPassword && data.newPassword !== data.confirmPassword) {
+      if (data.confirmPassword && newPwd !== String(data.confirmPassword).trim()) {
         throw new BadRequestException('Şifreler eşleşmiyor');
       }
 
       const bcrypt = require('bcrypt');
-      updateData.password = await bcrypt.hash(data.newPassword, 10);
+      updateData.password = await bcrypt.hash(newPwd, 10);
     }
 
     // Profile fields
@@ -310,7 +374,6 @@ export class UsersService {
 
     // Update user and profile in a transaction
     await this.prisma.$transaction(async (tx) => {
-      // Update user fields
       if (Object.keys(updateData).length > 0) {
         await tx.user.update({
           where: { id: userId },
@@ -318,20 +381,99 @@ export class UsersService {
         });
       }
 
-      // Update or create profile
       if (Object.keys(profileData).length > 0) {
+        const fallbackDisplayName =
+          profileData.displayName ||
+          existingTarget.profile?.displayName ||
+          `${profileData.firstName || ''} ${profileData.lastName || ''}`.trim() ||
+          existingTarget.username ||
+          existingTarget.email.split('@')[0];
+
         await tx.profile.upsert({
           where: { userId },
           update: profileData,
           create: {
             userId,
             ...profileData,
+            displayName: fallbackDisplayName,
           },
         });
       }
     });
 
-    return this.getUserWithProfile(userId);
+    return this.getUserById(userId);
+  }
+
+  async adminUpdateUserSubscription(
+    userId: string,
+    body: {
+      status?: SubscriptionStatus;
+      tier?: SubscriptionTier | null;
+      endDate?: string | null;
+      aiMessagesLimit?: number;
+      resetAiUsage?: boolean;
+    },
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { subscription: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Kullanıcı bulunamadı');
+    }
+
+    const existing = user.subscription;
+    const status = body.status ?? existing?.status ?? SubscriptionStatus.FREE;
+    const tier =
+      body.tier !== undefined
+        ? body.tier
+        : status === SubscriptionStatus.ACTIVE
+          ? existing?.tier ?? SubscriptionTier.MONTHLY
+          : existing?.tier ?? null;
+    const endDate =
+      body.endDate !== undefined
+        ? body.endDate
+          ? new Date(body.endDate)
+          : null
+        : existing?.endDate ??
+          (status === SubscriptionStatus.ACTIVE || status === SubscriptionStatus.TRIAL
+            ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+            : null);
+
+    const defaultLimit = status === SubscriptionStatus.ACTIVE || status === SubscriptionStatus.TRIAL ? 500 : 20;
+    const aiMessagesLimit =
+      body.aiMessagesLimit !== undefined
+        ? Math.max(0, Number(body.aiMessagesLimit))
+        : existing?.aiMessagesLimit ?? defaultLimit;
+
+    const startDate =
+      existing?.startDate ||
+      (status === SubscriptionStatus.ACTIVE || status === SubscriptionStatus.TRIAL ? new Date() : null);
+
+    await this.prisma.subscription.upsert({
+      where: { userId },
+      update: {
+        status,
+        tier,
+        startDate,
+        endDate,
+        aiMessagesLimit,
+        ...(body.resetAiUsage ? { aiMessagesUsed: 0 } : {}),
+      },
+      create: {
+        userId,
+        status,
+        tier,
+        startDate,
+        endDate,
+        aiMessagesLimit,
+        aiMessagesUsed: 0,
+        quotaResetDate: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1),
+      },
+    });
+
+    return this.getUserById(userId);
   }
 
   async deleteUser(userId: string) {
@@ -548,5 +690,73 @@ export class UsersService {
     });
 
     return { success: true, message: 'Şifre başarıyla değiştirildi' };
+  }
+
+  async getMyRetentionOffer(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        updatedAt: true,
+        profile: { select: { preferencesJson: true } },
+      },
+    });
+    if (!user) return { banner: null };
+
+    // Touch user activity timestamp at most once per 30 minutes for accurate DAU/WAU/MAU
+    const msSinceUpdate = Date.now() - new Date(user.updatedAt).getTime();
+    if (msSinceUpdate > 30 * 60 * 1000) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { updatedAt: new Date() },
+      });
+    }
+
+    const prefs = ((user.profile?.preferencesJson as Record<string, any>) || {});
+    return {
+      banner: prefs.pendingWinbackBanner || null,
+    };
+  }
+
+  async ackMyRetentionOffer(userId: string, action: 'dismiss' | 'claim') {
+    const profile = await this.prisma.profile.findUnique({ where: { userId } });
+    if (!profile) {
+      return { success: true, bonusGranted: 0 };
+    }
+
+    const prefs = ((profile.preferencesJson as Record<string, any>) || {});
+    const pending = prefs.pendingWinbackBanner;
+    const { pendingWinbackBanner: _removed, ...rest } = prefs;
+
+    let bonusGranted = 0;
+    if (action === 'claim' && pending?.incentive === 'nova_bonus') {
+      bonusGranted = 10;
+      await Promise.all([
+        this.prisma.usageQuota.updateMany({
+          where: { userId },
+          data: { limit: { increment: bonusGranted } },
+        }),
+        this.prisma.subscription.updateMany({
+          where: { userId },
+          data: { aiMessagesLimit: { increment: bonusGranted } },
+        }),
+      ]);
+    }
+
+    await this.prisma.profile.update({
+      where: { userId },
+      data: {
+        preferencesJson: {
+          ...rest,
+          ...(action === 'claim' ? { winbackRecoveredAt: new Date().toISOString() } : {}),
+        } as any,
+      },
+    });
+
+    return {
+      success: true,
+      action,
+      bonusGranted,
+    };
   }
 }

@@ -10,6 +10,21 @@ import { FunNotification, FunNotificationType } from '@/types/funNotifications';
 import { useFunNotificationStore } from '@/store/funNotificationStore';
 
 export class FunNotificationService {
+    private static dynamicPeriodNotifications: FunNotification[] | null = null;
+
+    static setDynamicPeriodNotifications(notifications: FunNotification[]): void {
+        this.dynamicPeriodNotifications =
+            Array.isArray(notifications) && notifications.length > 0
+                ? notifications
+                : null;
+    }
+
+    static getPeriodSupportPool(): FunNotification[] {
+        return this.dynamicPeriodNotifications && this.dynamicPeriodNotifications.length > 0
+            ? this.dynamicPeriodNotifications
+            : PERIOD_SUPPORT_NOTIFICATIONS;
+    }
+
     /**
      * Streak milestone'a göre bildirim al
      */
@@ -40,8 +55,10 @@ export class FunNotificationService {
             return null;
         }
 
+        const pool = this.getPeriodSupportPool();
+
         // Kapatılan bildirimi hariç tut ve cooldown kontrolü yap
-        const availableNotifications = PERIOD_SUPPORT_NOTIFICATIONS.filter(
+        const availableNotifications = pool.filter(
             n => n.id !== excludeId && canShowNotification(n.id, 1) // 1 saat cooldown (daha kısa)
         );
 
@@ -52,7 +69,7 @@ export class FunNotificationService {
 
         // Eğer cooldown'da hiç bildirim yoksa, excludeId hariç rastgele birini göster
         if (availableNotifications.length === 0) {
-            const fallbackNotifications = PERIOD_SUPPORT_NOTIFICATIONS.filter(n => n.id !== excludeId);
+            const fallbackNotifications = pool.filter(n => n.id !== excludeId);
             if (fallbackNotifications.length > 0) {
                 const randomIndex = Math.floor(Math.random() * fallbackNotifications.length);
                 if (__DEV__) {
@@ -223,6 +240,9 @@ export class FunNotificationService {
      * Tüm bildirimleri kategoriye göre getir
      */
     static getNotificationsByType(type: FunNotificationType): FunNotification[] {
+        if (type === 'PERIOD_SUPPORT') {
+            return this.getPeriodSupportPool();
+        }
         return ALL_FUN_NOTIFICATIONS.filter(n => n.type === type);
     }
 }

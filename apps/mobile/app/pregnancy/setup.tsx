@@ -31,7 +31,7 @@ export default function PregnancySetupScreen() {
   const [dueDateConfirmed, setDueDateConfirmed] = useState(false);
 
   // Fetch existing pregnancy data if editing
-  const { data: existingPregnancy } = useQuery({
+  const { data: existingPregnancy } = useQuery<any>({
     queryKey: ['pregnancy'],
     queryFn: () => pregnancyService.get(),
   });
@@ -455,7 +455,7 @@ export default function PregnancySetupScreen() {
                       ]}
                     >
                       {(tempLmpDate || lmpDate)
-                        ? (tempLmpDate || lmpDate).toLocaleDateString('tr-TR', {
+                        ? (tempLmpDate || lmpDate)!.toLocaleDateString('tr-TR', {
                             day: 'numeric',
                             month: 'long',
                             year: 'numeric',
@@ -526,7 +526,7 @@ export default function PregnancySetupScreen() {
                       ]}
                     >
                       {(tempDueDate || dueDate)
-                        ? (tempDueDate || dueDate).toLocaleDateString('tr-TR', {
+                        ? (tempDueDate || dueDate)!.toLocaleDateString('tr-TR', {
                             day: 'numeric',
                             month: 'long',
                             year: 'numeric',

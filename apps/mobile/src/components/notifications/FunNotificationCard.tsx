@@ -25,16 +25,16 @@ export function FunNotificationCard({
 
     // Bildirim tipine göre gradient renkleri
     const getGradientColors = () => {
-        if (notification.type === 'streak') {
+        if (notification.type === 'STREAK_MILESTONE') {
             return ['#FF6B35', '#FF8C42'] as const;
         }
-        if (notification.type === 'achievement') {
+        if (notification.type === 'ACHIEVEMENT_FUN') {
             return ['#A8E6CF', '#56AB91'] as const;
         }
-        if (notification.type === 'period') {
+        if (notification.type === 'PERIOD_SUPPORT') {
             return ['#FF6B9D', '#C44569'] as const;
         }
-        if (notification.type === 'reminder') {
+        if (notification.type === 'MOTIVATION') {
             return ['#FFB84D', '#FFD93D'] as const;
         }
         return ['#6C63FF', '#8B7FFF'] as const; // default

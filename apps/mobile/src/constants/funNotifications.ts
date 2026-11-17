@@ -211,11 +211,11 @@ export const PERIOD_SUPPORT_NOTIFICATIONS: FunNotification[] = [
     {
         id: 'period_1',
         type: 'PERIOD_SUPPORT',
-        titleTr: 'Yanındayız! 💕',
-        titleEn: "We're here for you! 💕",
-        messageTr: 'Regl dönemindesin. Kendine ekstra iyi bak! 🌸',
-        messageEn: "You're on your period. Take extra care of yourself! 🌸",
-        emoji: '💕',
+        titleTr: 'Bugün yalnız değilsin 🤍',
+        titleEn: "You're not alone today 🤍",
+        messageTr: 'Çok ağrın var ama ben hep senin yanındayım. Derin bir nefes al, bugün kendine izin ver. 💕',
+        messageEn: "The cramps may be tough today, but I'm right here with you. 🌸",
+        emoji: '🤍',
         triggerCondition: { isPeriodWeek: true }
     },
     {

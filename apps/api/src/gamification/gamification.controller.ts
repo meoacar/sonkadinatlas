@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, UseGuards, Req } from '@nestjs/common';
 import { GamificationService } from './gamification.service';
 import { AchievementService } from './achievement.service';
 import { InsightService } from './insight.service';
@@ -18,6 +18,28 @@ export class GamificationController {
         return this.gamificationService.getUserStats(req.user.id);
     }
 
+    @Get('daily-tasks')
+    async getDailyTasks(@Req() req: any) {
+        return this.gamificationService.getDailyTasks(req.user.id);
+    }
+
+    @Post('daily-checkin')
+    async submitDailyCheckin(
+        @Req() req: any,
+        @Body()
+        body: {
+            mood?: string;
+            energy?: number;
+            symptoms?: string[];
+            water250?: boolean;
+            note?: string;
+        },
+    ) {
+        const res = await this.gamificationService.submitDailyCheckin(req.user.id, body || {});
+        await this.achievementService.checkAchievements(req.user.id).catch(() => null);
+        return res;
+    }
+
     @Get('achievements')
     async getAchievements(@Req() req: any) {
         return this.achievementService.getUserAchievements(req.user.id);
@@ -34,8 +56,14 @@ export class GamificationController {
     }
 
     @Get('insights')
-    async getInsights(@Req() req: any) {
-        return this.insightService.getUserInsights(req.user.id);
+    async getInsights(@Req() req: any, @Query('includeRead') includeRead?: string) {
+        const showRead = includeRead === undefined ? true : includeRead !== 'false';
+        return this.insightService.getUserInsights(req.user.id, showRead);
+    }
+
+    @Post('insights/read-all')
+    async markAllInsightsAsRead(@Req() req: any) {
+        return this.insightService.markAllAsRead(req.user.id);
     }
 
     @Post('insights/:id/read')

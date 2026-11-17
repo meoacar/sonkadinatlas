@@ -1,22 +1,44 @@
-import PostHog from 'posthog-react-native';
+export interface PostHogClient {
+    capture: (eventName: string, properties?: Record<string, any>) => void;
+    screen: (screenName: string, properties?: Record<string, any>) => void;
+    identify: (userId: string, properties?: Record<string, any>) => void;
+    reset: () => void;
+    setPersonProperties: (properties: Record<string, any>) => void;
+}
 
 const POSTHOG_API_KEY = process.env.POSTHOG_API_KEY;
 const POSTHOG_HOST = process.env.POSTHOG_HOST || 'https://app.posthog.com';
 
-let posthogInstance: PostHog | null = null;
+let posthogInstance: PostHogClient | null = null;
 
-export async function initPostHog() {
+function loadPostHogModule(): { initAsync?: (apiKey: string, options: Record<string, any>) => Promise<PostHogClient> } | null {
+    try {
+        // Optional dependency loaded dynamically if installed
+        const mod = require('posthog-react-native');
+        return mod?.default || mod || null;
+    } catch {
+        return null;
+    }
+}
+
+export async function initPostHog(): Promise<PostHogClient | null> {
     if (!POSTHOG_API_KEY || POSTHOG_API_KEY === '__OPTIONAL__') {
         console.log('PostHog API key not configured, skipping initialization');
         return null;
     }
 
+    const PostHogModule = loadPostHogModule();
+    if (!PostHogModule?.initAsync) {
+        console.log('posthog-react-native not installed, skipping initialization');
+        return null;
+    }
+
     try {
-        posthogInstance = await PostHog.initAsync(POSTHOG_API_KEY, {
+        posthogInstance = await PostHogModule.initAsync(POSTHOG_API_KEY, {
             host: POSTHOG_HOST,
             captureApplicationLifecycleEvents: true,
             captureDeepLinks: true,
-            enableSessionReplay: false, // Enable if needed
+            enableSessionReplay: false,
         });
 
         return posthogInstance;
@@ -26,7 +48,7 @@ export async function initPostHog() {
     }
 }
 
-export function getPostHog(): PostHog | null {
+export function getPostHog(): PostHogClient | null {
     return posthogInstance;
 }
 

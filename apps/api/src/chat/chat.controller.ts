@@ -8,6 +8,8 @@ import {
   Req,
   Sse,
   Logger,
+  BadRequestException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Observable } from 'rxjs';
@@ -172,11 +174,26 @@ export class ChatController {
   }
 
   @Post(':conversationId/message')
+  @UseGuards(QuotaGuard)
   async sendMessage(
     @CurrentUser() user: any,
     @Param('conversationId') conversationId: string,
     @Body('content') content: string,
   ) {
+    const config = await this.quotaService.getLimitsConfig();
+    if (!config.isNovaEnabled) {
+      throw new ServiceUnavailableException(config.maintenanceMessage);
+    }
+    const trimmed = (content || '').trim();
+    if (!trimmed) {
+      throw new BadRequestException('Mesaj boş olamaz');
+    }
+    if (trimmed.length > config.maxMessageLength) {
+      throw new BadRequestException(
+        `Mesaj en fazla ${config.maxMessageLength} karakter olabilir`,
+      );
+    }
+
     // Ensure conversation exists or create it
     const conversation = await this.chatService.getOrCreateConversation(
       user.id,
@@ -187,7 +204,7 @@ export class ChatController {
     const message = await this.chatService.saveMessage(
       conversation.id,
       'user',
-      content,
+      trimmed,
     );
 
     return { messageId: message.id, conversationId: conversation.id };
@@ -199,6 +216,11 @@ export class ChatController {
     @CurrentUser() user: any,
     @Param('conversationId') conversationId: string,
   ): Promise<Observable<MessageEvent>> {
+    const config = await this.quotaService.getLimitsConfig();
+    if (!config.isNovaEnabled) {
+      throw new ServiceUnavailableException(config.maintenanceMessage);
+    }
+
     // Get the last user message from this conversation
     const history = await this.chatService.getConversationHistory(
       conversationId,

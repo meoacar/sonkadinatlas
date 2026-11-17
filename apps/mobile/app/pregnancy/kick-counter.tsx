@@ -22,11 +22,11 @@ export default function KickCounterScreen() {
   const [kickCount, setKickCount] = useState(0);
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const goal = 10; // Default goal
 
   // Fetch recent kick sessions
-  const { data: kickHistory } = useQuery({
+  const { data: kickHistory } = useQuery<any[]>({
     queryKey: ['kicks'],
     queryFn: () => pregnancyService.getKicks(10),
   });

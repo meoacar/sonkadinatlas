@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { QuestionCategory } from '@/types/qna';
 import { memo } from 'react';
@@ -18,7 +19,11 @@ export const CategoryPill = memo(function CategoryPill({
 
     return (
         <View style={[styles.container, { backgroundColor: config.backgroundColor }]}>
-            <Text style={styles.icon}>{config.icon}</Text>
+            <Ionicons
+                name={config.icon}
+                size={size === 'small' ? 11 : 13}
+                color={config.color}
+            />
             <Text style={[styles.text, { color: config.color }]}>{config.label}</Text>
         </View>
     );
@@ -26,7 +31,7 @@ export const CategoryPill = memo(function CategoryPill({
 
 interface CategoryConfig {
     label: string;
-    icon: string;
+    icon: keyof typeof Ionicons.glyphMap;
     color: string;
     backgroundColor: string;
 }
@@ -35,75 +40,75 @@ function getCategoryConfig(category: QuestionCategory): CategoryConfig {
     const configs: Record<QuestionCategory, CategoryConfig> = {
         [QuestionCategory.MENSTRUAL_HEALTH]: {
             label: 'Adet Sağlığı',
-            icon: '🩸',
-            color: '#DC2626',
-            backgroundColor: 'rgba(220, 38, 38, 0.1)',
+            icon: 'water-outline',
+            color: '#E11D48',
+            backgroundColor: 'rgba(225, 29, 72, 0.12)',
         },
         [QuestionCategory.PREGNANCY]: {
             label: 'Hamilelik',
-            icon: '🤰',
-            color: '#EC4899',
-            backgroundColor: 'rgba(236, 72, 153, 0.1)',
+            icon: 'heart-outline',
+            color: '#DB2777',
+            backgroundColor: 'rgba(219, 39, 119, 0.12)',
         },
         [QuestionCategory.FERTILITY]: {
             label: 'Doğurganlık',
-            icon: '🌸',
-            color: '#F59E0B',
-            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+            icon: 'flower-outline',
+            color: '#D97706',
+            backgroundColor: 'rgba(217, 119, 6, 0.12)',
         },
         [QuestionCategory.NUTRITION]: {
             label: 'Beslenme',
-            icon: '🥗',
-            color: '#10B981',
-            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+            icon: 'nutrition-outline',
+            color: '#059669',
+            backgroundColor: 'rgba(5, 150, 105, 0.12)',
         },
         [QuestionCategory.EXERCISE]: {
             label: 'Egzersiz',
-            icon: '💪',
-            color: '#3B82F6',
-            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            icon: 'fitness-outline',
+            color: '#2563EB',
+            backgroundColor: 'rgba(37, 99, 235, 0.12)',
         },
         [QuestionCategory.MENTAL_HEALTH]: {
             label: 'Ruh Sağlığı',
-            icon: '🧠',
-            color: '#8B5CF6',
-            backgroundColor: 'rgba(139, 92, 246, 0.1)',
+            icon: 'leaf-outline',
+            color: '#7C3AED',
+            backgroundColor: 'rgba(124, 58, 237, 0.12)',
         },
         [QuestionCategory.SLEEP]: {
             label: 'Uyku',
-            icon: '😴',
-            color: '#6366F1',
-            backgroundColor: 'rgba(99, 102, 241, 0.1)',
+            icon: 'moon-outline',
+            color: '#4F46E5',
+            backgroundColor: 'rgba(79, 70, 229, 0.12)',
         },
         [QuestionCategory.CONTRACEPTION]: {
             label: 'Doğum Kontrolü',
-            icon: '💊',
-            color: '#06B6D4',
-            backgroundColor: 'rgba(6, 182, 212, 0.1)',
+            icon: 'shield-checkmark-outline',
+            color: '#0891B2',
+            backgroundColor: 'rgba(8, 145, 178, 0.12)',
         },
         [QuestionCategory.PMS]: {
             label: 'PMS',
-            icon: '😣',
-            color: '#EF4444',
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            icon: 'pulse-outline',
+            color: '#DC2626',
+            backgroundColor: 'rgba(220, 38, 38, 0.12)',
         },
         [QuestionCategory.MENOPAUSE]: {
             label: 'Menopoz',
-            icon: '🌡️',
-            color: '#F97316',
-            backgroundColor: 'rgba(249, 115, 22, 0.1)',
+            icon: 'sunny-outline',
+            color: '#EA580C',
+            backgroundColor: 'rgba(234, 88, 12, 0.12)',
         },
         [QuestionCategory.SEXUAL_HEALTH]: {
             label: 'Cinsel Sağlık',
-            icon: '❤️',
-            color: '#E11D48',
-            backgroundColor: 'rgba(225, 29, 72, 0.1)',
+            icon: 'sparkles-outline',
+            color: '#BE185D',
+            backgroundColor: 'rgba(190, 24, 93, 0.12)',
         },
         [QuestionCategory.GENERAL]: {
             label: 'Genel',
-            icon: '💬',
-            color: '#64748B',
-            backgroundColor: 'rgba(100, 116, 139, 0.1)',
+            icon: 'chatbubbles-outline',
+            color: '#475569',
+            backgroundColor: 'rgba(100, 116, 139, 0.14)',
         },
     };
 
@@ -117,17 +122,14 @@ const createStyles = (theme: ReturnType<typeof useTheme>, size: 'small' | 'mediu
         container: {
             flexDirection: 'row',
             alignItems: 'center',
-            gap: isSmall ? 4 : 6,
+            gap: isSmall ? 4 : 5,
             paddingHorizontal: isSmall ? 8 : 10,
-            paddingVertical: isSmall ? 4 : 6,
-            borderRadius: isSmall ? 10 : 12,
-        },
-        icon: {
-            fontSize: isSmall ? 12 : 14,
+            paddingVertical: isSmall ? 3.5 : 5,
+            borderRadius: 12,
         },
         text: {
-            fontSize: isSmall ? 11 : 12,
-            fontWeight: '600',
+            fontSize: isSmall ? 11 : 11.5,
+            fontWeight: '700',
         },
     });
 };

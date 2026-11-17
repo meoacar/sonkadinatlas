@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { UseGuards } from '@nestjs/common';
 import { AdminService } from './admin.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 /**
  * WebSocket Gateway for Real-time Admin Updates
@@ -33,22 +34,24 @@ export class AdminGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     private connectedAdmins = new Map<string, Socket>();
 
-    constructor(private adminService: AdminService) {
+    constructor(
+        private adminService: AdminService,
+        private prisma: PrismaService,
+    ) {
         // Start periodic updates
         this.startPeriodicUpdates();
     }
 
-    handleConnection(client: Socket) {
-        console.log(`Admin connected: ${client.id}`);
-
-        // TODO: Verify admin authentication from socket handshake
-        const adminId = this.extractAdminId(client);
-        if (adminId) {
-            this.connectedAdmins.set(adminId, client);
-
-            // Send initial data
-            this.sendInitialData(client);
+    async handleConnection(client: Socket) {
+        const adminId = await this.verifyAdminSocket(client);
+        if (!adminId) {
+            client.emit('error', { message: 'Yetkisiz WebSocket bağlantısı' });
+            client.disconnect(true);
+            return;
         }
+
+        this.connectedAdmins.set(adminId, client);
+        this.sendInitialData(client);
     }
 
     handleDisconnect(client: Socket) {
@@ -151,17 +154,40 @@ export class AdminGateway implements OnGatewayConnection, OnGatewayDisconnect {
     /**
      * Extract admin ID from socket connection
      */
-    private extractAdminId(client: Socket): string | null {
-        const token =
+    private async verifyAdminSocket(client: Socket): Promise<string | null> {
+        const rawAuth =
             client.handshake.auth?.token ||
-            client.handshake.headers?.authorization?.replace('Bearer ', '');
+            client.handshake.headers?.authorization;
+        const token = typeof rawAuth === 'string'
+            ? rawAuth.replace(/^Bearer\s+/i, '').trim()
+            : '';
         if (!token) return null;
 
         try {
             const jwt = require('jsonwebtoken');
-            const secret = process.env.JWT_SECRET || 'dev-secret-key';
+            const secret = process.env.JWT_SECRET;
+            if (!secret) return null;
+
             const decoded: any = jwt.verify(token, secret);
-            return decoded?.sub || decoded?.id || 'admin-id';
+            const userId = decoded?.sub || decoded?.id;
+            if (!userId) return null;
+
+            const user = await this.prisma.user.findUnique({
+                where: { id: userId },
+                select: { id: true, email: true, isAdmin: true, status: true },
+            });
+            if (!user || user.status !== 'ACTIVE') return null;
+
+            const adminEmails = (process.env.ADMIN_EMAILS || '')
+                .split(',')
+                .map((e) => e.trim().toLowerCase())
+                .filter(Boolean);
+            const isAdmin =
+                Boolean(user.isAdmin) ||
+                user.email.toLowerCase().endsWith('@admin.wellnesscompanion.com') ||
+                adminEmails.includes(user.email.toLowerCase());
+
+            return isAdmin ? user.id : null;
         } catch {
             return null;
         }

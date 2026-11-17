@@ -43,6 +43,7 @@ export interface UserAchievement {
     userId: string;
     achievementId: string;
     progress: number;
+    target?: number;
     isCompleted: boolean;
     completedAt: string | null;
     notificationSent: boolean;
@@ -73,8 +74,14 @@ export interface GamificationStats {
     totalXp: number;
     currentStreak: number;
     longestStreak: number;
+    streakFreezeUsed?: number;
+    streakFreezeLimit?: number;
     totalDataEntries: number;
+    totalSymptoms?: number;
+    totalWellnessLogs?: number;
     achievements: number;
+    totalBadges?: number;
+    unreadInsights?: number;
     xpNeeded: number;
     xpProgress: number;
     xpTotal: number;
@@ -94,4 +101,37 @@ export interface AchievementProgress {
     achievement: Achievement;
     progressPercentage: number;
     target: number;
+}
+
+export interface DailyTask {
+    id: string;
+    title: string;
+    description: string;
+    xp: number;
+    completed: boolean;
+    actionRoute: string;
+}
+
+export interface DailyTasksResponse {
+    dateKey: string;
+    completedCount: number;
+    totalCount: number;
+    allCompleted: boolean;
+    bonusXp: number;
+    bonusAwarded: boolean;
+    tasks: DailyTask[];
+    todayCheckin: {
+        mood: string | null;
+        symptoms: string[];
+        note: string | null;
+        energy: number | null;
+    } | null;
+}
+
+export interface DailyCheckinPayload {
+    mood?: string;
+    energy?: number;
+    symptoms?: string[];
+    water250?: boolean;
+    note?: string;
 }

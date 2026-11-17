@@ -23,7 +23,7 @@ export function SearchBar({
 
     const [localValue, setLocalValue] = useState(value);
     const [isFocused, setIsFocused] = useState(false);
-    const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+    const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const focusAnim = useRef(new Animated.Value(0)).current;
 
     // Sync external value changes

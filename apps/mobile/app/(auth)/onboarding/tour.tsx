@@ -1,6 +1,15 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Alert,
+  Image,
+} from 'react-native';
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { useOnboardingStore } from '@/store/onboardingStore';
 import { useAuthStore } from '@/store/authStore';
@@ -10,63 +19,75 @@ import { authService, cyclesService, userService } from '@/services/api';
 
 const TOTAL_STEPS = 6;
 
-const TOUR_CARDS = [
+const FEATURE_SHOWCASE = [
   {
-    emoji: '📅',
-    title: 'Adet Takvimi',
+    key: 'cycle',
+    shortTitle: 'Takvim',
+    title: 'Akıllı Döngü & Faz Rehberi',
+    icon: 'calendar-outline' as const,
+    color: '#EC4899',
     description:
-      'Adet döngünüzü takip edin, tahminleri görün ve sağlığınızı daha iyi yönetin.',
+      'Regl, ovülasyon ve luteal faz tahminlerini takip et; her fazda enerjine uygun öneriler al.',
+    highlight: 'Takvim sekmesinde canlı tahmin',
   },
   {
-    emoji: '⏰',
-    title: 'Hatırlatmalar',
+    key: 'nova',
+    shortTitle: 'NOVA AI',
+    title: '7/24 Kişisel Sağlık Asistanın',
+    icon: 'sparkles-outline' as const,
+    color: '#8B5CF6',
     description:
-      'Su içme, ilaç alma ve diğer önemli görevler için hatırlatmalar oluşturun.',
+      'Semptomların, ruh halin ve soruların için yargısız, bilimsel temelli yanıtlar al.',
+    highlight: 'Sohbet geçmişine duyarlı hafıza',
   },
   {
-    emoji: '💬',
-    title: 'AI Asistan',
+    key: 'wellness',
+    shortTitle: 'Wellness',
+    title: 'Su, Uyku ve 4-7-8 Nefes',
+    icon: 'water-outline' as const,
+    color: '#0EA5E9',
     description:
-      'Sağlık soularınızı sorun, kişiselleştirilmiş öneriler alın ve günlük takibinizi yapın.',
+      'Günlük su hedefini, uyku süreni ve stres anlarında nefes egzersizlerini tek yerden yönet.',
+    highlight: 'Tek dokunuşla günlük kayıt',
+  },
+  {
+    key: 'reminders',
+    shortTitle: 'Hatırlatma',
+    title: 'Zamanında Gelen Nazik Uyarılar',
+    icon: 'notifications-outline' as const,
+    color: '#F59E0B',
+    description:
+      'Sessiz saatlerine saygı duyan akıllı hatırlatmalarla ilaç, su ve dönem takibini kaçırma.',
+    highlight: 'Ayarlardan anında özelleştir',
   },
 ];
 
 export default function TourStep() {
   const router = useRouter();
   const theme = useTheme();
-  const { data, updateData, completeStep, setCurrentStep, clearData } = useOnboardingStore();
+  const { data, completeStep, setCurrentStep, clearData } = useOnboardingStore();
   const { setAuth } = useAuthStore();
 
-  const [currentCard, setCurrentCard] = useState(0);
+  const [selectedFeatureIdx, setSelectedFeatureIdx] = useState(0);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setCurrentStep(6);
   }, []);
 
-  const handleNext = () => {
-    if (currentCard < TOUR_CARDS.length - 1) {
-      setCurrentCard(currentCard + 1);
-    } else {
-      handleComplete();
-    }
-  };
-
-  const handleSkip = () => {
-    handleComplete();
-  };
-
   const handleBack = () => {
-    if (currentCard > 0) {
-      setCurrentCard(currentCard - 1);
-    } else {
-      router.back();
-    }
+    router.back();
   };
 
   const handleComplete = async () => {
-    // Validate required fields
-    if (!data.email || !data.password || !data.username || !data.firstName || !data.lastName || !data.birthDate) {
+    if (
+      !data.email ||
+      !data.password ||
+      !data.username ||
+      !data.firstName ||
+      !data.lastName ||
+      !data.birthDate
+    ) {
       Alert.alert('Hata', 'Lütfen tüm gerekli alanları doldurun');
       router.push('/(auth)/onboarding/identity');
       return;
@@ -74,61 +95,59 @@ export default function TourStep() {
 
     setLoading(true);
     try {
-      // Register user with all required fields
+      const birthDateIso = new Date(data.birthDate).toISOString();
+
       const response = await authService.register({
         email: data.email,
         password: data.password,
         username: data.username,
         firstName: data.firstName,
         lastName: data.lastName,
-        dateOfBirth: data.birthDate.toISOString(),
+        dateOfBirth: birthDateIso,
       });
 
-      // Save auth tokens
       await setAuth(response.user, {
         accessToken: response.accessToken,
         refreshToken: response.refreshToken,
       });
 
-      // Update profile with height and weight if provided
       if (data.heightCm || data.weightKg) {
         try {
           await userService.updateMe({
             heightCm: data.heightCm,
             weightKg: data.weightKg,
           });
-          console.log('Profile updated with height/weight');
         } catch (error) {
           console.error('Failed to update height/weight:', error);
-          // Don't block registration if profile update fails
         }
       }
 
-      // If user provided last period date, create cycle
       if (data.lastPeriodDate) {
         try {
-          // Create a date at midnight in local timezone to avoid timezone issues
           const localDate = new Date(data.lastPeriodDate);
           localDate.setHours(0, 0, 0, 0);
-          console.log('Creating cycle with date:', localDate.toISOString());
           await cyclesService.createCycle({
             startDate: localDate.toISOString(),
           });
-          console.log('Cycle created successfully');
         } catch (error) {
           console.error('Failed to create initial cycle:', error);
-          // Don't block registration if cycle creation fails
         }
       }
 
-      // Complete onboarding
-      completeStep(6);
+      const chosePremium = data.selectedPlan === 'premium';
+      const chosenTier = data.selectedTier || 'YEARLY';
 
-      // Clear onboarding data
+      completeStep(6);
       await clearData();
 
-      // Navigate to home
-      router.replace('/(tabs)/home');
+      if (chosePremium) {
+        router.replace({
+          pathname: '/premium',
+          params: { tier: chosenTier, fromOnboarding: '1' },
+        } as any);
+      } else {
+        router.replace('/(tabs)/home');
+      }
     } catch (error: any) {
       Alert.alert('Kayıt Hatası', error.message || 'Bir hata oluştu');
     } finally {
@@ -136,53 +155,154 @@ export default function TourStep() {
     }
   };
 
-  const card = TOUR_CARDS[currentCard];
+  const activeFeature = FEATURE_SHOWCASE[selectedFeatureIdx];
+  const firstName = data.firstName?.trim() || 'Hoş Geldin';
+  const planLabel =
+    data.selectedPlan === 'premium'
+      ? data.selectedTier === 'MONTHLY'
+        ? 'Aylık Premium'
+        : 'Yıllık Premium'
+      : 'Ücretsiz Plan';
+
+  const summaryItems = [
+    {
+      icon: 'person-outline' as const,
+      label: data.username ? `@${data.username}` : firstName,
+    },
+    {
+      icon: 'calendar-outline' as const,
+      label: data.lastPeriodDate ? 'Döngü kaydedildi' : 'Takvim hazır',
+    },
+    {
+      icon: 'sparkles-outline' as const,
+      label: planLabel,
+    },
+  ];
+
   const styles = createStyles(theme);
 
   return (
     <StepContainer
       currentStep={6}
       totalSteps={TOTAL_STEPS}
-      title="Hızlı Tur 🎉"
-      subtitle="Uygulamayı keşfet"
+      title="Her Şey Hazır"
+      subtitle="Hesabını oluşturmadan önce kişisel alanına göz at."
+      onBack={handleBack}
     >
       <View style={styles.content}>
-        {/* Tour Card */}
-        <View style={styles.tourCard}>
-          <Text style={styles.cardEmoji}>{card.emoji}</Text>
-          <Text style={styles.cardTitle}>{card.title}</Text>
-          <Text style={styles.cardDescription}>{card.description}</Text>
-        </View>
-
-        {/* Progress Dots */}
-        <View style={styles.dotsContainer}>
-          {TOUR_CARDS.map((_, index) => (
-            <View
-              key={index}
-              style={[styles.dot, index === currentCard && styles.dotActive]}
+        {/* Celebration Hero Card with Mascot */}
+        <LinearGradient
+          colors={
+            theme.isDark ? ['#2A1836', '#1B1429'] : ['#FFF0F7', '#F5EEFF']
+          }
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.heroCard}
+        >
+          <View style={styles.mascotWrap}>
+            <Image
+              source={require('../../../assets/images/mascot/5.png')}
+              style={styles.mascot}
             />
+          </View>
+          <View style={styles.heroBody}>
+            <Text style={styles.heroBadgeText}>KAYIT ÖZETİ</Text>
+            <Text style={styles.heroGreeting}>
+              Harika, {firstName}!
+            </Text>
+            <Text style={styles.heroDesc}>
+              Tüm tercihlerin hazır. Tek dokunuşla Kadın Atlası dünyana katıl.
+            </Text>
+          </View>
+        </LinearGradient>
+
+        {/* User Setup Summary Strip */}
+        <View style={styles.summaryStrip}>
+          {summaryItems.map((item) => (
+            <View key={item.label} style={styles.summaryPill}>
+              <Ionicons
+                name={item.icon}
+                size={13}
+                color={theme.colors.primary}
+              />
+              <Text style={styles.summaryPillText} numberOfLines={1}>
+                {item.label}
+              </Text>
+            </View>
           ))}
         </View>
 
-        {/* Info */}
-        <View style={styles.infoCard}>
-          <Text style={styles.infoEmoji}>🎯</Text>
-          <Text style={styles.infoText}>
-            {currentCard === TOUR_CARDS.length - 1
-              ? 'Hazırsın! Sağlıklı yaşam yolculuğuna başla'
-              : 'Bu özellikleri uygulamada keşfedebilirsin'}
-          </Text>
+        {/* Interactive Feature Showcase Tabs */}
+        <View style={styles.showcaseCard}>
+          <View style={styles.tabsRow}>
+            {FEATURE_SHOWCASE.map((item, idx) => {
+              const selected = idx === selectedFeatureIdx;
+              return (
+                <TouchableOpacity
+                  key={item.key}
+                  activeOpacity={0.8}
+                  onPress={() => setSelectedFeatureIdx(idx)}
+                  style={[styles.tabPill, selected && styles.tabPillActive]}
+                >
+                  <Ionicons
+                    name={item.icon}
+                    size={15}
+                    color={selected ? '#FFFFFF' : theme.colors.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.tabText,
+                      selected && styles.tabTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {item.shortTitle}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={styles.featurePreview}>
+            <View
+              style={[
+                styles.featureIconCircle,
+                { backgroundColor: `${activeFeature.color}1A` },
+              ]}
+            >
+              <Ionicons
+                name={activeFeature.icon}
+                size={28}
+                color={activeFeature.color}
+              />
+            </View>
+
+            <Text style={styles.featureTitle}>{activeFeature.title}</Text>
+            <Text style={styles.featureDesc}>
+              {activeFeature.description}
+            </Text>
+
+            <View style={styles.featureTipPill}>
+              <Ionicons
+                name="checkmark-circle"
+                size={14}
+                color={theme.colors.success}
+              />
+              <Text style={styles.featureTipText}>
+                {activeFeature.highlight}
+              </Text>
+            </View>
+          </View>
         </View>
       </View>
 
       <StepButtons
-        onNext={handleNext}
-        onSkip={currentCard < TOUR_CARDS.length - 1 ? handleSkip : undefined}
-        onBack={handleBack}
+        onNext={handleComplete}
         nextLabel={
-          currentCard === TOUR_CARDS.length - 1 ? 'Başla 🚀' : 'İleri'
+          data.selectedPlan === 'premium'
+            ? 'Hesabı Oluştur ve Premium’a Geç'
+            : 'Hesabı Oluştur ve Başla'
         }
-        skipLabel="Turu Atla"
         loading={loading}
       />
     </StepContainer>
@@ -193,69 +313,151 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
     content: {
       flex: 1,
-      justifyContent: 'center',
+      gap: 12,
     },
-    tourCard: {
-      backgroundColor: theme.colors.backgroundCard,
-      borderRadius: theme.card.borderRadius,
-      padding: theme.spacing.xxl,
+    heroCard: {
+      flexDirection: 'row',
       alignItems: 'center',
-      shadowColor: theme.card.shadowColor,
-      shadowOffset: theme.card.shadowOffset,
-      shadowOpacity: theme.card.shadowOpacity,
-      shadowRadius: theme.card.shadowRadius,
-      elevation: theme.card.elevation,
-      marginBottom: theme.spacing.xl,
+      gap: 14,
+      borderRadius: 24,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
     },
-    cardEmoji: {
-      fontSize: 80,
-      marginBottom: theme.spacing.lg,
+    mascotWrap: {
+      width: 78,
+      height: 78,
+      borderRadius: 39,
+      backgroundColor: theme.colors.backgroundCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: theme.colors.primary,
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.16,
+      shadowRadius: 10,
+      elevation: 4,
     },
-    cardTitle: {
-      ...theme.typography.title,
+    mascot: {
+      width: 64,
+      height: 64,
+      resizeMode: 'contain',
+    },
+    heroBody: {
+      flex: 1,
+      gap: 3,
+    },
+    heroBadgeText: {
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.8,
+      color: theme.colors.primary,
+    },
+    heroGreeting: {
+      fontSize: 21,
+      fontWeight: '800',
       color: theme.colors.text,
-      marginBottom: theme.spacing.md,
-      textAlign: 'center',
-      fontSize: 28,
     },
-    cardDescription: {
-      ...theme.typography.body,
+    heroDesc: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      lineHeight: 17,
+    },
+    summaryStrip: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    summaryPill: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 5,
+      backgroundColor: theme.colors.backgroundCard,
+      borderRadius: 12,
+      paddingHorizontal: 8,
+      paddingVertical: 9,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    summaryPillText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: theme.colors.text,
+      flexShrink: 1,
+    },
+    showcaseCard: {
+      backgroundColor: theme.colors.backgroundCard,
+      borderRadius: 22,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      gap: 16,
+    },
+    tabsRow: {
+      flexDirection: 'row',
+      gap: 6,
+    },
+    tabPill: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
+      paddingVertical: 9,
+      paddingHorizontal: 6,
+      borderRadius: 12,
+      backgroundColor: theme.isDark ? '#121215' : '#F3F4F6',
+    },
+    tabPillActive: {
+      backgroundColor: theme.colors.primary,
+    },
+    tabText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: theme.colors.textSecondary,
+    },
+    tabTextActive: {
+      color: '#FFFFFF',
+    },
+    featurePreview: {
+      alignItems: 'center',
+      paddingHorizontal: 8,
+      paddingBottom: 6,
+    },
+    featureIconCircle: {
+      width: 60,
+      height: 60,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 12,
+    },
+    featureTitle: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: theme.colors.text,
+      textAlign: 'center',
+      marginBottom: 6,
+    },
+    featureDesc: {
+      fontSize: 13,
       color: theme.colors.textSecondary,
       textAlign: 'center',
-      lineHeight: 24,
-      paddingHorizontal: theme.spacing.md,
+      lineHeight: 19,
+      marginBottom: 14,
     },
-    dotsContainer: {
-      flexDirection: 'row',
-      justifyContent: 'center',
-      gap: theme.spacing.sm,
-      marginBottom: theme.spacing.xl,
-    },
-    dot: {
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-      backgroundColor: theme.colors.border,
-    },
-    dotActive: {
-      backgroundColor: theme.colors.primary,
-      width: 24,
-    },
-    infoCard: {
-      backgroundColor: theme.colors.backgroundSecondary,
-      borderRadius: theme.card.borderRadius,
-      padding: theme.spacing.lg,
+    featureTipPill: {
       flexDirection: 'row',
       alignItems: 'center',
+      gap: 6,
+      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 12,
     },
-    infoEmoji: {
-      fontSize: 24,
-      marginRight: theme.spacing.md,
-    },
-    infoText: {
-      ...theme.typography.body,
-      color: theme.colors.text,
-      flex: 1,
-      lineHeight: 22,
+    featureTipText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: theme.colors.success,
     },
   });

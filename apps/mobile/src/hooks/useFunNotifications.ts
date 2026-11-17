@@ -3,11 +3,13 @@ import { AppState } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { FunNotification } from '@/types/funNotifications';
 import { FunNotificationService } from '@/services/funNotificationService';
+import { syncPeriodNotifications } from '@/services/periodNotificationSync';
 import { useFunNotificationStore } from '@/store/funNotificationStore';
 
 interface UseFunNotificationsOptions {
     streakDay?: number;
     dataEntryCount?: number;
+    cycleDay?: number;
     isPeriodWeek?: boolean;
     lastDataEntryHours?: number;
     autoShow?: boolean;
@@ -16,6 +18,7 @@ interface UseFunNotificationsOptions {
 export function useFunNotifications(options: UseFunNotificationsOptions = {}) {
     const [currentNotification, setCurrentNotification] = useState<FunNotification | null>(null);
     const [hasPermission, setHasPermission] = useState(false);
+    const [periodPoolVersion, setPeriodPoolVersion] = useState(0);
     const { preferences } = useFunNotificationStore();
 
     // İzin kontrolü
@@ -43,6 +46,24 @@ export function useFunNotifications(options: UseFunNotificationsOptions = {}) {
             setHasPermission(false);
         }
     };
+
+    useEffect(() => {
+        let mounted = true;
+        syncPeriodNotifications({
+            cycleDay: options.cycleDay,
+            isPeriodWeek: options.isPeriodWeek,
+            scheduleLocal: hasPermission,
+        })
+            .then(() => {
+                if (mounted) {
+                    setPeriodPoolVersion((v) => v + 1);
+                }
+            })
+            .catch(() => {});
+        return () => {
+            mounted = false;
+        };
+    }, [options.cycleDay, options.isPeriodWeek, hasPermission]);
 
     useEffect(() => {
         if (__DEV__) {
@@ -97,7 +118,8 @@ export function useFunNotifications(options: UseFunNotificationsOptions = {}) {
         options.lastDataEntryHours,
         options.autoShow,
         preferences.enabled,
-        hasPermission  // İzin değiştiğinde tekrar kontrol et
+        hasPermission,  // İzin değiştiğinde tekrar kontrol et
+        periodPoolVersion,
     ]);
 
     const dismissNotification = () => {

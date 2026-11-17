@@ -1,59 +1,130 @@
-import { Injectable, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Inject, forwardRef, OnModuleInit, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GamificationService } from './gamification.service';
 
 @Injectable()
-export class AchievementService {
+export class AchievementService implements OnModuleInit {
+    private readonly logger = new Logger(AchievementService.name);
+
     constructor(
         private prisma: PrismaService,
         @Inject(forwardRef(() => GamificationService))
         private gamificationService: GamificationService,
     ) { }
 
+    async onModuleInit() {
+        try {
+            const count = await this.prisma.achievement.count();
+            if (count === 0) {
+                const seeded = await this.seedAchievements();
+                this.logger.log(`Auto-seeded ${seeded.length} default achievements.`);
+            }
+        } catch (err) {
+            this.logger.warn(`Auto-seed achievements skipped: ${(err as Error).message}`);
+        }
+    }
+
+    async getLiveMetrics(userId: string) {
+        const gamification = await this.gamificationService.getUserGamification(userId);
+        const [dailyLogsCount, waterLogsCount, cyclesCount, answersCount, questionsCount] =
+            await Promise.all([
+                this.prisma.dailyLog.count({ where: { userId } }),
+                this.prisma.waterLog.count({ where: { userId } }),
+                this.prisma.periodCycle.count({ where: { userId } }),
+                this.prisma.answer.count({ where: { userId } }),
+                this.prisma.question.count({ where: { userId } }),
+            ]);
+
+        const totalDataEntries = Math.max(
+            gamification.totalDataEntries,
+            dailyLogsCount + waterLogsCount + cyclesCount,
+        );
+        const totalWellnessLogs = Math.max(gamification.totalWellnessLogs, waterLogsCount);
+
+        return {
+            gamification,
+            currentStreak: gamification.currentStreak,
+            longestStreak: gamification.longestStreak,
+            level: gamification.level,
+            totalDataEntries,
+            totalWellnessLogs,
+            totalSymptoms: gamification.totalSymptoms,
+            waterLogsCount,
+            cyclesCount,
+            answersCount,
+            questionsCount,
+        };
+    }
+
+    evaluateProgress(requirement: any, metrics: Awaited<ReturnType<AchievementService['getLiveMetrics']>>) {
+        const req = requirement || {};
+        let progress = 0;
+        let target = 1;
+
+        switch (req.type) {
+            case 'streak':
+                progress = Math.max(metrics.currentStreak, metrics.longestStreak);
+                target = Number(req.days || req.count || 1);
+                break;
+            case 'data_entry':
+                progress = metrics.totalDataEntries;
+                target = Number(req.count || 1);
+                break;
+            case 'level':
+                progress = metrics.level;
+                target = Number(req.level || req.count || 1);
+                break;
+            case 'wellness':
+                progress = metrics.totalWellnessLogs;
+                target = Number(req.count || 1);
+                break;
+            case 'symptoms':
+                progress = metrics.totalSymptoms;
+                target = Number(req.count || 1);
+                break;
+            case 'water_logs':
+                progress = metrics.waterLogsCount;
+                target = Number(req.count || 1);
+                break;
+            case 'cycles':
+                progress = metrics.cyclesCount;
+                target = Number(req.count || 1);
+                break;
+            case 'community_answers':
+                progress = metrics.answersCount;
+                target = Number(req.count || 1);
+                break;
+            case 'community_questions':
+                progress = metrics.questionsCount;
+                target = Number(req.count || 1);
+                break;
+            case 'manual':
+                progress = 0;
+                target = Number(req.count || 1);
+                break;
+            default:
+                progress = metrics.totalDataEntries;
+                target = Number(req.count || req.days || req.level || 1);
+                break;
+        }
+
+        const safeTarget = Math.max(target, 1);
+        const isEligible = req.type !== 'manual' && progress >= safeTarget;
+        return { progress, target: safeTarget, isEligible };
+    }
+
     // Check and award achievements
     async checkAchievements(userId: string) {
-        const gamification = await this.gamificationService.getUserGamification(userId);
+        const metrics = await this.getLiveMetrics(userId);
         const newAchievements: any[] = [];
 
-        // Get all active achievements
         const achievements = await this.prisma.achievement.findMany({
             where: { isActive: true },
         });
 
         for (const achievement of achievements) {
-            const requirement = achievement.requirementJson as any;
-            let isEligible = false;
-            let progress = 0;
+            const { progress, isEligible } = this.evaluateProgress(achievement.requirementJson, metrics);
 
-            // Check different achievement types - use REAL user data
-            switch (requirement.type) {
-                case 'streak':
-                    progress = gamification.currentStreak;
-                    isEligible = gamification.currentStreak >= requirement.days;
-                    break;
-
-                case 'data_entry':
-                    progress = gamification.totalDataEntries;
-                    isEligible = gamification.totalDataEntries >= requirement.count;
-                    break;
-
-                case 'level':
-                    progress = gamification.level;
-                    isEligible = gamification.level >= requirement.level;
-                    break;
-
-                case 'wellness':
-                    progress = gamification.totalWellnessLogs;
-                    isEligible = gamification.totalWellnessLogs >= requirement.count;
-                    break;
-
-                case 'symptoms':
-                    progress = gamification.totalSymptoms;
-                    isEligible = gamification.totalSymptoms >= requirement.count;
-                    break;
-            }
-
-            // Check if user already has this achievement
             const existing = await this.prisma.userAchievement.findUnique({
                 where: {
                     userId_achievementId: {
@@ -64,7 +135,6 @@ export class AchievementService {
             });
 
             if (!existing) {
-                // Create new achievement record with REAL progress
                 await this.prisma.userAchievement.create({
                     data: {
                         userId,
@@ -77,26 +147,24 @@ export class AchievementService {
 
                 if (isEligible) {
                     newAchievements.push(achievement);
-                    // Award XP
                     await this.gamificationService.addXp(userId, achievement.points);
                 }
             } else {
-                // Always update progress with REAL data
+                const effectiveCompleted = existing.isCompleted || isEligible;
                 const shouldUpdate = existing.progress !== progress || (!existing.isCompleted && isEligible);
 
                 if (shouldUpdate) {
                     await this.prisma.userAchievement.update({
                         where: { id: existing.id },
                         data: {
-                            progress,
-                            isCompleted: isEligible ? true : existing.isCompleted,
+                            progress: existing.isCompleted ? Math.max(existing.progress, progress) : progress,
+                            isCompleted: effectiveCompleted,
                             completedAt: isEligible && !existing.isCompleted ? new Date() : existing.completedAt,
                         },
                     });
 
                     if (isEligible && !existing.isCompleted) {
                         newAchievements.push(achievement);
-                        // Award XP
                         await this.gamificationService.addXp(userId, achievement.points);
                     }
                 }
@@ -106,94 +174,62 @@ export class AchievementService {
         return newAchievements;
     }
 
-    // Get user achievements - returns ALL achievements with progress
+    // Get user achievements - returns ALL active achievements with live progress
     async getUserAchievements(userId: string) {
-        // Get all active achievements
-        const allAchievements = await this.prisma.achievement.findMany({
-            where: { isActive: true },
-            orderBy: { sortOrder: 'asc' },
-        });
+        await this.checkAchievements(userId);
 
-        // Get user's achievement records
-        const userAchievements = await this.prisma.userAchievement.findMany({
-            where: { userId },
-        });
+        const [allAchievements, userAchievements, metrics] = await Promise.all([
+            this.prisma.achievement.findMany({
+                where: { isActive: true },
+                orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+            }),
+            this.prisma.userAchievement.findMany({
+                where: { userId },
+            }),
+            this.getLiveMetrics(userId),
+        ]);
 
-        // Get current gamification stats for progress calculation
-        const gamification = await this.gamificationService.getUserGamification(userId);
-
-        // Create a map of user achievements for quick lookup
         const userAchievementMap = new Map(
-            userAchievements.map(ua => [ua.achievementId, ua])
+            userAchievements.map((ua) => [ua.achievementId, ua]),
         );
 
-        // Combine all achievements with user progress
-        const result = allAchievements.map(achievement => {
+        const result = allAchievements.map((achievement) => {
             const userAchievement = userAchievementMap.get(achievement.id);
-
-            // Calculate current progress based on requirement type
-            const requirement = achievement.requirementJson as any;
-            let currentProgress = 0;
-
-            switch (requirement.type) {
-                case 'streak':
-                    currentProgress = gamification.currentStreak;
-                    break;
-                case 'data_entry':
-                    currentProgress = gamification.totalDataEntries;
-                    break;
-                case 'level':
-                    currentProgress = gamification.level;
-                    break;
-                case 'wellness':
-                    currentProgress = gamification.totalWellnessLogs;
-                    break;
-                case 'symptoms':
-                    currentProgress = gamification.totalSymptoms;
-                    break;
-            }
+            const { progress, target } = this.evaluateProgress(achievement.requirementJson, metrics);
 
             if (userAchievement) {
-                // Return existing user achievement with updated progress
                 return {
                     ...userAchievement,
                     achievement,
-                    progress: currentProgress, // Use real-time progress
-                };
-            } else {
-                // Return achievement with initial progress
-                return {
-                    id: `temp-${achievement.id}`,
-                    userId,
-                    achievementId: achievement.id,
-                    progress: currentProgress,
-                    isCompleted: false,
-                    completedAt: null,
-                    notificationSent: false,
-                    createdAt: new Date(),
-                    updatedAt: new Date(),
-                    achievement,
+                    progress: userAchievement.isCompleted ? Math.max(userAchievement.progress, target) : progress,
+                    target,
                 };
             }
+
+            return {
+                id: `temp-${achievement.id}`,
+                userId,
+                achievementId: achievement.id,
+                progress,
+                target,
+                isCompleted: false,
+                completedAt: null,
+                notificationSent: false,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                achievement,
+            };
         });
 
-        // Sort: completed first, then by progress percentage
+        // Sort: completed first, then highest progress %, then sortOrder
         return result.sort((a, b) => {
             if (a.isCompleted !== b.isCompleted) {
                 return a.isCompleted ? -1 : 1;
             }
-
-            // Calculate progress percentage for sorting
-            const reqA = a.achievement.requirementJson as any;
-            const reqB = b.achievement.requirementJson as any;
-
-            const targetA = reqA.count || reqA.days || reqA.level || 1;
-            const targetB = reqB.count || reqB.days || reqB.level || 1;
-
-            const progressA = (a.progress / targetA) * 100;
-            const progressB = (b.progress / targetB) * 100;
-
-            return progressB - progressA;
+            const pctA = Math.min((a.progress / Math.max(a.target, 1)) * 100, 100);
+            const pctB = Math.min((b.progress / Math.max(b.target, 1)) * 100, 100);
+            if (pctB !== pctA) return pctB - pctA;
+            return (a.achievement.sortOrder || 0) - (b.achievement.sortOrder || 0);
         });
     }
 
@@ -213,26 +249,16 @@ export class AchievementService {
             return null;
         }
 
-        const requirement = userAchievement.achievement.requirementJson as any;
-        let target = 0;
-
-        switch (requirement.type) {
-            case 'streak':
-                target = requirement.days;
-                break;
-            case 'data_entry':
-            case 'wellness':
-            case 'symptoms':
-                target = requirement.count;
-                break;
-            case 'level':
-                target = requirement.level;
-                break;
-        }
+        const metrics = await this.getLiveMetrics(userId);
+        const { progress, target } = this.evaluateProgress(
+            userAchievement.achievement.requirementJson,
+            metrics,
+        );
 
         return {
             ...userAchievement,
-            progressPercentage: target > 0 ? (userAchievement.progress / target) * 100 : 0,
+            progress,
+            progressPercentage: target > 0 ? Math.min((progress / target) * 100, 100) : 0,
             target,
         };
     }
@@ -240,7 +266,20 @@ export class AchievementService {
     // Seed initial achievements
     async seedAchievements() {
         const achievements: any[] = [
-            // Streak achievements
+            {
+                key: 'first_step',
+                nameTr: 'İlk Adım',
+                nameEn: 'First Step',
+                descriptionTr: 'İlk sağlık veya su takibi kaydını oluştur',
+                descriptionEn: 'Log your very first health or water entry',
+                iconEmoji: '🌱',
+                color: '#10B981',
+                category: 'DATA_ENTRY',
+                rarity: 'COMMON',
+                requirementJson: { type: 'data_entry', count: 1 },
+                points: 25,
+                sortOrder: 1,
+            },
             {
                 key: 'first_week',
                 nameTr: 'İlk Hafta',
@@ -248,10 +287,12 @@ export class AchievementService {
                 descriptionTr: '7 gün üst üste veri girişi yap',
                 descriptionEn: 'Log data for 7 consecutive days',
                 iconEmoji: '🔥',
+                color: '#F59E0B',
                 category: 'STREAK',
                 rarity: 'COMMON',
                 requirementJson: { type: 'streak', days: 7 },
                 points: 50,
+                sortOrder: 2,
             },
             {
                 key: 'loyal_tracker',
@@ -260,24 +301,55 @@ export class AchievementService {
                 descriptionTr: '30 gün üst üste veri girişi yap',
                 descriptionEn: 'Log data for 30 consecutive days',
                 iconEmoji: '⭐',
+                color: '#3B82F6',
                 category: 'STREAK',
                 rarity: 'RARE',
                 requirementJson: { type: 'streak', days: 30 },
                 points: 200,
+                sortOrder: 3,
             },
             {
                 key: 'legend_100',
-                nameTr: 'Efsane',
-                nameEn: 'Legend',
+                nameTr: '100 Gün Efsanesi',
+                nameEn: '100-Day Legend',
                 descriptionTr: '100 gün üst üste veri girişi yap',
                 descriptionEn: 'Log data for 100 consecutive days',
                 iconEmoji: '💎',
+                color: '#8B5CF6',
                 category: 'STREAK',
-                rarity: 'EPIC',
+                rarity: 'LEGENDARY',
                 requirementJson: { type: 'streak', days: 100 },
                 points: 1000,
+                sortOrder: 4,
             },
-            // Data entry achievements
+            {
+                key: 'hydration_hero',
+                nameTr: 'Su Kahramanı',
+                nameEn: 'Hydration Hero',
+                descriptionTr: '15 kez su tüketimi kaydı ekle',
+                descriptionEn: 'Log water intake 15 times',
+                iconEmoji: '💧',
+                color: '#0EA5E9',
+                category: 'WELLNESS',
+                rarity: 'COMMON',
+                requirementJson: { type: 'water_logs', count: 15 },
+                points: 60,
+                sortOrder: 5,
+            },
+            {
+                key: 'wellness_warrior',
+                nameTr: 'Sağlık Savaşçısı',
+                nameEn: 'Wellness Warrior',
+                descriptionTr: '30 wellness kaydı oluştur',
+                descriptionEn: 'Create 30 wellness logs',
+                iconEmoji: '💪',
+                color: '#EC4899',
+                category: 'WELLNESS',
+                rarity: 'RARE',
+                requirementJson: { type: 'wellness', count: 30 },
+                points: 150,
+                sortOrder: 6,
+            },
             {
                 key: 'data_hunter',
                 nameTr: 'Veri Avcısı',
@@ -285,10 +357,12 @@ export class AchievementService {
                 descriptionTr: '50 kez veri girişi yap',
                 descriptionEn: 'Log data 50 times',
                 iconEmoji: '📊',
+                color: '#6366F1',
                 category: 'DATA_ENTRY',
                 rarity: 'COMMON',
                 requirementJson: { type: 'data_entry', count: 50 },
                 points: 100,
+                sortOrder: 7,
             },
             {
                 key: 'consistent_tracker',
@@ -297,10 +371,12 @@ export class AchievementService {
                 descriptionTr: '100 kez veri girişi yap',
                 descriptionEn: 'Log data 100 times',
                 iconEmoji: '🎯',
+                color: '#8B5CF6',
                 category: 'DATA_ENTRY',
                 rarity: 'RARE',
                 requirementJson: { type: 'data_entry', count: 100 },
                 points: 250,
+                sortOrder: 8,
             },
             {
                 key: 'year_champion',
@@ -309,61 +385,68 @@ export class AchievementService {
                 descriptionTr: '365 kez veri girişi yap',
                 descriptionEn: 'Log data 365 times',
                 iconEmoji: '🏆',
+                color: '#F59E0B',
                 category: 'DATA_ENTRY',
                 rarity: 'LEGENDARY',
                 requirementJson: { type: 'data_entry', count: 365 },
                 points: 2000,
+                sortOrder: 9,
             },
-            // Wellness achievements
-            {
-                key: 'wellness_warrior',
-                nameTr: 'Sağlık Savaşçısı',
-                nameEn: 'Wellness Warrior',
-                descriptionTr: '30 wellness kaydı oluştur',
-                descriptionEn: 'Create 30 wellness logs',
-                iconEmoji: '💪',
-                category: 'WELLNESS',
-                rarity: 'RARE',
-                requirementJson: { type: 'wellness', count: 30 },
-                points: 150,
-            },
-            // Symptom tracking
             {
                 key: 'symptom_detective',
                 nameTr: 'Semptom Dedektifi',
                 nameEn: 'Symptom Detective',
-                descriptionTr: '50 farklı semptom kaydet',
-                descriptionEn: 'Log 50 different symptoms',
+                descriptionTr: '50 semptom kaydı tut',
+                descriptionEn: 'Log 50 symptoms',
                 iconEmoji: '🔍',
+                color: '#14B8A6',
                 category: 'DATA_ENTRY',
                 rarity: 'RARE',
                 requirementJson: { type: 'symptoms', count: 50 },
                 points: 200,
+                sortOrder: 10,
             },
-            // Level achievements
+            {
+                key: 'community_helper',
+                nameTr: 'Topluluk Destekçisi',
+                nameEn: 'Community Helper',
+                descriptionTr: 'Toplulukta en az 3 cevaba katkı sağla',
+                descriptionEn: 'Post at least 3 answers in the community',
+                iconEmoji: '🤝',
+                color: '#EC4899',
+                category: 'COMMUNITY',
+                rarity: 'RARE',
+                requirementJson: { type: 'community_answers', count: 3 },
+                points: 150,
+                sortOrder: 11,
+            },
             {
                 key: 'level_5',
-                nameTr: 'Seviye 5',
-                nameEn: 'Level 5',
+                nameTr: 'Parlayan Yıldız (Sv. 5)',
+                nameEn: 'Rising Star (Lv. 5)',
                 descriptionTr: '5. seviyeye ulaş',
                 descriptionEn: 'Reach level 5',
                 iconEmoji: '🌟',
+                color: '#F59E0B',
                 category: 'MILESTONE',
                 rarity: 'COMMON',
                 requirementJson: { type: 'level', level: 5 },
                 points: 100,
+                sortOrder: 12,
             },
             {
                 key: 'level_10',
-                nameTr: 'Seviye 10',
-                nameEn: 'Level 10',
+                nameTr: 'Kozmik Usta (Sv. 10)',
+                nameEn: 'Cosmic Master (Lv. 10)',
                 descriptionTr: '10. seviyeye ulaş',
                 descriptionEn: 'Reach level 10',
                 iconEmoji: '✨',
+                color: '#A855F7',
                 category: 'MILESTONE',
-                rarity: 'RARE',
+                rarity: 'EPIC',
                 requirementJson: { type: 'level', level: 10 },
                 points: 300,
+                sortOrder: 13,
             },
         ];
 

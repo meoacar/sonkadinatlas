@@ -92,6 +92,75 @@ export interface UsageStats {
     insightsGenerated: number;
     memberSince: string;
     currentStreak: number;
+    longestStreak?: number;
+    totalDataEntries?: number;
+    completedBadges?: number;
+}
+
+export interface PremiumPlanConfig {
+    tier: SubscriptionTier;
+    isActive: boolean;
+    title: string;
+    subtitle: string;
+    price: number;
+    currency: string;
+    currencySymbol: string;
+    iosProductId: string;
+    androidProductId: string;
+    trialDays: number;
+    badgeText?: string;
+    savingsText?: string;
+    features: string[];
+}
+
+export interface PremiumBenefitItem {
+    id: string;
+    icon: string;
+    color: string;
+    title: string;
+    description: string;
+    isActive: boolean;
+}
+
+export interface PremiumComparisonRow {
+    id: string;
+    icon: string;
+    color: string;
+    title: string;
+    freeValue: string | boolean;
+    premiumValue: string | boolean;
+    isActive: boolean;
+}
+
+export interface PremiumFaqItem {
+    id: string;
+    question: string;
+    answer: string;
+    isActive: boolean;
+}
+
+export interface PremiumPaywallConfig {
+    heroEyebrow: string;
+    heroTitle: string;
+    heroSubtitle: string;
+    heroHighlights: string[];
+    trialEnabled: boolean;
+    trialTitle: string;
+    trialDescription: string;
+    ctaButtonText: string;
+    ctaTrialButtonText: string;
+    ctaFooterNote: string;
+    defaultSelectedTier: SubscriptionTier;
+    premiumAiMessageLimit: number;
+    freeAiMessageLimit: number;
+    plans: {
+        MONTHLY: PremiumPlanConfig;
+        YEARLY: PremiumPlanConfig;
+    };
+    benefits: PremiumBenefitItem[];
+    comparisonRows: PremiumComparisonRow[];
+    faqs: PremiumFaqItem[];
+    updatedAt?: string;
 }
 
 export interface PurchaseRequest {

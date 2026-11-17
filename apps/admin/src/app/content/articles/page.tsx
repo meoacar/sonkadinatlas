@@ -1,9 +1,9 @@
 'use client';
 
-import { useTable } from '@refinedev/antd';
-import { List, EditButton, DeleteButton } from '@refinedev/antd';
-import { Table, Tag, Space, Button, Image } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { useState } from 'react';
+import { useTable, List, EditButton, DeleteButton } from '@refinedev/antd';
+import { Table, Tag, Space, Button, Image, Input, Select } from 'antd';
+import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useRouter } from 'next/navigation';
 
@@ -22,12 +22,29 @@ const CATEGORY_LABELS: Record<string, string> = {
     sexual_health: 'Cinsel Sağlık',
 };
 
+const FALLBACK_PIXEL =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mN8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+
 export default function ArticlesList() {
     const router = useRouter();
-    const { tableProps } = useTable({
+    const [search, setSearch] = useState('');
+    const [categoryFilter, setCategoryFilter] = useState<string | undefined>();
+
+    const { tableProps, setFilters } = useTable({
         resource: 'content/articles',
-        syncWithLocation: true,
+        syncWithLocation: false,
     });
+
+    const applyFilters = (nextSearch: string, nextCategory?: string) => {
+        const filters: any[] = [];
+        if (nextSearch.trim()) {
+            filters.push({ field: 'search', operator: 'contains', value: nextSearch.trim() });
+        }
+        if (nextCategory) {
+            filters.push({ field: 'category', operator: 'eq', value: nextCategory });
+        }
+        setFilters(filters, 'replace');
+    };
 
     const columns = [
         {
@@ -37,12 +54,12 @@ export default function ArticlesList() {
             width: 80,
             render: (url: string, record: any) => (
                 <Image
-                    src={url || record.imageUrl || '/placeholder.png'}
+                    src={url || record.imageUrl || FALLBACK_PIXEL}
                     alt="Makale görseli"
                     width={60}
                     height={60}
-                    style={{ objectFit: 'cover', borderRadius: 8 }}
-                    fallback="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mN8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+                    style={{ objectFit: 'cover', borderRadius: 8, background: '#fdf2f8' }}
+                    fallback={FALLBACK_PIXEL}
                 />
             ),
         },
@@ -116,6 +133,35 @@ export default function ArticlesList() {
                 </Button>
             }
         >
+            <Space wrap style={{ marginBottom: 16 }}>
+                <Input
+                    placeholder="Makale başlığı veya özet ara..."
+                    prefix={<SearchOutlined />}
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    onPressEnter={() => applyFilters(search, categoryFilter)}
+                    style={{ width: 250 }}
+                    allowClear
+                />
+                <Select
+                    placeholder="Kategori"
+                    allowClear
+                    value={categoryFilter}
+                    onChange={(val) => {
+                        setCategoryFilter(val);
+                        applyFilters(search, val);
+                    }}
+                    style={{ width: 180 }}
+                    options={Object.entries(CATEGORY_LABELS).map(([value, label]) => ({
+                        value,
+                        label,
+                    }))}
+                />
+                <Button type="primary" onClick={() => applyFilters(search, categoryFilter)}>
+                    Filtrele
+                </Button>
+            </Space>
+
             <Table
                 {...tableProps}
                 columns={columns}

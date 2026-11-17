@@ -34,7 +34,7 @@ export default function MedicationsScreen() {
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
 
   // Fetch medications
-  const { data: medications, isLoading } = useQuery({
+  const { data: medications, isLoading } = useQuery<any[]>({
     queryKey: ['medications'],
     queryFn: () => pregnancyService.getMedications(),
   });

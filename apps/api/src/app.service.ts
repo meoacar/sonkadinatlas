@@ -48,4 +48,37 @@ export class AppService {
       uptime: process.uptime(),
     };
   }
+
+  async getPublicSiteSummary() {
+    const [activeArticlesCount, totalBadgesCount, pages] = await Promise.all([
+      this.prisma.educationalArticle.count({
+        where: {
+          isActive: true,
+          OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }],
+        },
+      }),
+      this.prisma.achievement.count({ where: { isActive: true } }),
+      this.prisma.page.findMany({
+        where: { isActive: true },
+        select: {
+          slug: true,
+          titleTr: true,
+          titleEn: true,
+          sortOrder: true,
+        },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
+      }),
+    ]);
+
+    return {
+      brand: 'Kadın Atlası',
+      activeArticlesCount,
+      totalBadgesCount,
+      pages,
+      storeLinks: {
+        ios: process.env.APP_STORE_URL || 'https://apps.apple.com',
+        android: process.env.PLAY_STORE_URL || 'https://play.google.com/store',
+      },
+    };
+  }
 }

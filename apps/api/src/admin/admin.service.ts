@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
+import { PushService } from '../reminders/push.service';
 import { Prisma, UserStatus, SubscriptionStatus } from '@prisma/client';
 
 export interface DashboardStats {
@@ -47,7 +49,11 @@ export interface BulkOperationResult {
 
 @Injectable()
 export class AdminService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private mailService: MailService,
+        private pushService: PushService,
+    ) { }
 
     /**
      * Dashboard Statistics with Charts
@@ -106,7 +112,13 @@ export class AdminService {
             select: { tier: true },
         });
 
-        const tierPrices = { FREE: 0, PREMIUM: 9.99, PREMIUM_PLUS: 19.99 };
+        const tierPrices: Record<string, number> = {
+            FREE: 0,
+            MONTHLY: 99,
+            YEARLY: 83,
+            PREMIUM: 99,
+            PREMIUM_PLUS: 199,
+        };
         const revenue = activeSubscriptions.reduce((sum, sub) => {
             return sum + (tierPrices[sub.tier || 'FREE'] || 0);
         }, 0);
@@ -281,7 +293,13 @@ export class AdminService {
             dailyRevenue.set(dateStr, 0);
         }
 
-        const tierPrices = { FREE: 0, PREMIUM: 9.99, PREMIUM_PLUS: 19.99 };
+        const tierPrices: Record<string, number> = {
+            FREE: 0,
+            MONTHLY: 99,
+            YEARLY: 999,
+            PREMIUM: 99,
+            PREMIUM_PLUS: 199,
+        };
         subscriptions.forEach((sub) => {
             const dateStr = sub.createdAt.toISOString().split('T')[0];
             const price = tierPrices[sub.tier || 'FREE'] || 0;
@@ -388,6 +406,45 @@ export class AdminService {
         return result;
     }
 
+    async bulkSendEmails(
+        userIds: string[],
+        email: { subject: string; body: string },
+    ): Promise<BulkOperationResult> {
+        const result: BulkOperationResult = {
+            success: 0,
+            failed: 0,
+            errors: [],
+        };
+
+        const users = await this.prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: { id: true, email: true },
+        });
+        const userMap = new Map(users.map((u) => [u.id, u.email]));
+
+        for (const userId of userIds) {
+            const recipient = userMap.get(userId);
+            if (!recipient) {
+                result.failed++;
+                result.errors.push(`User ${userId}: E-posta adresi bulunamadı`);
+                continue;
+            }
+            try {
+                await this.mailService.sendAdminBroadcastEmail(
+                    recipient,
+                    email.subject,
+                    email.body,
+                );
+                result.success++;
+            } catch (error: any) {
+                result.failed++;
+                result.errors.push(`${recipient}: ${error.message}`);
+            }
+        }
+
+        return result;
+    }
+
     /**
      * Advanced Filtering
      */
@@ -416,52 +473,66 @@ export class AdminService {
             sortOrder = 'desc',
         } = filters;
 
-        const where: Prisma.UserWhereInput = {};
+        const andConditions: Prisma.UserWhereInput[] = [];
 
         // Search in email, username, or profile name
         if (search) {
-            where.OR = [
-                { email: { contains: search, mode: 'insensitive' } },
-                { username: { contains: search, mode: 'insensitive' } },
-                {
-                    profile: {
-                        OR: [
-                            { firstName: { contains: search, mode: 'insensitive' } },
-                            { lastName: { contains: search, mode: 'insensitive' } },
-                            { displayName: { contains: search, mode: 'insensitive' } },
-                        ],
+            andConditions.push({
+                OR: [
+                    { email: { contains: search, mode: 'insensitive' } },
+                    { username: { contains: search, mode: 'insensitive' } },
+                    {
+                        profile: {
+                            OR: [
+                                { firstName: { contains: search, mode: 'insensitive' } },
+                                { lastName: { contains: search, mode: 'insensitive' } },
+                                { displayName: { contains: search, mode: 'insensitive' } },
+                            ],
+                        },
                     },
-                },
-            ];
+                ],
+            });
         }
 
         if (status) {
-            where.status = status;
+            andConditions.push({ status });
         }
 
         if (createdAfter || createdBefore) {
-            where.createdAt = {};
-            if (createdAfter) where.createdAt.gte = createdAfter;
-            if (createdBefore) where.createdAt.lte = createdBefore;
+            const createdAtFilter: Prisma.DateTimeFilter = {};
+            if (createdAfter) createdAtFilter.gte = createdAfter;
+            if (createdBefore) createdAtFilter.lte = createdBefore;
+            andConditions.push({ createdAt: createdAtFilter });
         }
 
         if (hasSubscription !== undefined) {
             if (hasSubscription) {
-                where.subscription = { isNot: null };
+                andConditions.push({ subscription: { isNot: null } });
             } else {
-                where.subscription = null;
+                andConditions.push({ subscription: null });
             }
         }
 
         if (subscriptionStatus) {
-            where.subscription = {
-                status: subscriptionStatus,
-            };
+            if (subscriptionStatus === SubscriptionStatus.FREE) {
+                andConditions.push({
+                    OR: [{ subscription: { status: SubscriptionStatus.FREE } }, { subscription: null }],
+                });
+            } else {
+                andConditions.push({ subscription: { status: subscriptionStatus } });
+            }
         }
 
-        const skip = (page - 1) * limit;
+        const where: Prisma.UserWhereInput =
+            andConditions.length === 1 ? andConditions[0] : andConditions.length > 1 ? { AND: andConditions } : {};
 
-        const [users, total] = await Promise.all([
+        const skip = (page - 1) * limit;
+        const safeSortBy = ['createdAt', 'updatedAt', 'email', 'status'].includes(sortBy)
+            ? sortBy
+            : 'createdAt';
+        const safeSortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
+
+        const [users, total, activeCount, suspendedCount, premiumCount, adminCount] = await Promise.all([
             this.prisma.user.findMany({
                 where,
                 skip,
@@ -469,17 +540,28 @@ export class AdminService {
                 include: {
                     profile: true,
                     subscription: true,
+                    pregnancy: {
+                        select: { isActive: true, weekCache: true },
+                    },
                     _count: {
                         select: {
                             conversations: true,
+                            periodCycles: true,
+                            dailyLogs: true,
                             questions: true,
                             answers: true,
                         },
                     },
                 },
-                orderBy: { [sortBy]: sortOrder },
+                orderBy: { [safeSortBy]: safeSortOrder },
             }),
             this.prisma.user.count({ where }),
+            this.prisma.user.count({ where: { status: 'ACTIVE' } }),
+            this.prisma.user.count({ where: { status: 'SUSPENDED' } }),
+            this.prisma.user.count({
+                where: { status: 'ACTIVE', subscription: { status: 'ACTIVE' } },
+            }),
+            this.prisma.user.count({ where: { isAdmin: true } }),
         ]);
 
         // Remove sensitive data
@@ -491,6 +573,12 @@ export class AdminService {
             page,
             limit,
             totalPages: Math.ceil(total / limit),
+            stats: {
+                active: activeCount,
+                suspended: suspendedCount,
+                premium: premiumCount,
+                admin: adminCount,
+            },
         };
     }
 
@@ -577,79 +665,253 @@ export class AdminService {
      * System Health Metrics
      */
     async getSystemHealth() {
-        const startTime = Date.now();
         const [
-            dbStatus,
+            dbProbe,
             userCount,
-            activeConnections,
+            active5Min,
+            active15Min,
+            errorSummary,
+            aiProviders,
+            maintenanceFlag,
+            openTickets,
+            pendingReports,
         ] = await Promise.all([
             this.checkDatabaseHealth(),
             this.prisma.user.count(),
-            this.getActiveConnections(),
+            this.getActiveConnections(5),
+            this.getActiveConnections(15),
+            this.getErrorSummary(),
+            this.prisma.aIProviderConfig.findMany({
+                select: { provider: true, isActive: true, displayName: true },
+            }),
+            this.prisma.featureFlag.findUnique({
+                where: { key: 'maintenance_mode' },
+                select: { valueJson: true },
+            }),
+            this.countOpenSupportTickets(),
+            this.prisma.contentReport.count({
+                where: { status: 'PENDING' },
+            }),
         ]);
-        const dbResponseTime = Date.now() - startTime;
 
-        // Calculate error rate from recent audit logs (if any errors logged)
-        const errorRate = await this.getErrorRate();
+        const enabledProviders = aiProviders
+            .filter((p) => p.isActive)
+            .map((p) => String(p.provider));
+        const envFallback = Boolean(
+            process.env.GOOGLE_API_KEY ||
+            process.env.GEMINI_API_KEY ||
+            process.env.OPENAI_API_KEY ||
+            process.env.ANTHROPIC_API_KEY,
+        );
+        const maintenanceEnabled = Boolean(
+            (maintenanceFlag?.valueJson as any)?.enabled,
+        );
+
+        let overallStatus: 'healthy' | 'degraded' | 'unhealthy' | 'maintenance' = 'healthy';
+        if (!dbProbe.connected) {
+            overallStatus = 'unhealthy';
+        } else if (maintenanceEnabled) {
+            overallStatus = 'maintenance';
+        } else if (
+            errorSummary.rate > 0.05 ||
+            (aiProviders.length > 0 && enabledProviders.length === 0 && !envFallback)
+        ) {
+            overallStatus = 'degraded';
+        }
+
+        const mem = process.memoryUsage();
 
         return {
-            status: dbStatus ? 'healthy' : 'unhealthy',
+            status: overallStatus,
             database: {
-                connected: dbStatus,
-                responseTime: dbResponseTime,
+                connected: dbProbe.connected,
+                responseTime: dbProbe.responseTimeMs,
+            },
+            server: {
+                uptimeSeconds: Math.round(process.uptime()),
+                memoryUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+                memoryRssMb: Math.round(mem.rss / 1024 / 1024),
+                nodeVersion: process.version,
+                environment: process.env.NODE_ENV || 'development',
             },
             users: {
                 total: userCount,
-                active: activeConnections,
+                active: active5Min,
+                active15Min,
+            },
+            ai: {
+                totalProviders: aiProviders.length,
+                enabledCount: enabledProviders.length,
+                enabledProviders,
+                envFallback,
+            },
+            maintenance: {
+                enabled: maintenanceEnabled,
+            },
+            support: {
+                openTickets,
+                pendingReports,
             },
             errors: {
-                rate: errorRate,
-                threshold: 0.05, // 5% error rate threshold
+                rate: errorSummary.rate,
+                errorCountLastHour: errorSummary.errorActions,
+                requestsLastHour: errorSummary.totalActions,
+                threshold: 0.05,
             },
             timestamp: new Date().toISOString(),
         };
     }
 
-    private async checkDatabaseHealth(): Promise<boolean> {
+    private async checkDatabaseHealth(): Promise<{ connected: boolean; responseTimeMs: number }> {
+        const start = Date.now();
         try {
             await this.prisma.$queryRaw`SELECT 1`;
-            return true;
+            return { connected: true, responseTimeMs: Date.now() - start };
         } catch {
-            return false;
+            return { connected: false, responseTimeMs: Date.now() - start };
         }
     }
 
-    private async getActiveConnections(): Promise<number> {
-        // Count users with activity in last 5 minutes
-        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-        const activeUsers = await this.prisma.user.count({
+    private async getActiveConnections(minutes = 5): Promise<number> {
+        const cutoff = new Date(Date.now() - minutes * 60 * 1000);
+        return this.prisma.user.count({
             where: {
-                updatedAt: { gte: fiveMinutesAgo },
+                status: 'ACTIVE',
+                OR: [
+                    { updatedAt: { gte: cutoff } },
+                    { dailyLogs: { some: { createdAt: { gte: cutoff } } } },
+                    { waterLogs: { some: { createdAt: { gte: cutoff } } } },
+                    { periodCycles: { some: { updatedAt: { gte: cutoff } } } },
+                    { auditLogs: { some: { createdAt: { gte: cutoff } } } },
+                    {
+                        conversations: {
+                            some: {
+                                messages: {
+                                    some: { createdAt: { gte: cutoff } },
+                                },
+                            },
+                        },
+                    },
+                ],
             },
         });
-        return activeUsers;
     }
 
-    private async getErrorRate(): Promise<number> {
-        // Calculate error rate from audit logs in last hour
+    private async countOpenSupportTickets(): Promise<number> {
+        const rows = await this.prisma.featureFlag.findMany({
+            where: { key: { startsWith: 'support_ticket_' } },
+            select: { valueJson: true },
+        });
+        return rows.filter((r) => {
+            const st = (r.valueJson as any)?.status;
+            return st === 'OPEN' || st === 'IN_PROGRESS';
+        }).length;
+    }
+
+    private async getErrorSummary(): Promise<{
+        totalActions: number;
+        errorActions: number;
+        rate: number;
+    }> {
         const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
 
         const [totalActions, errorActions] = await Promise.all([
             this.prisma.auditLog.count({
-                where: {
-                    createdAt: { gte: oneHourAgo },
-                },
+                where: { createdAt: { gte: oneHourAgo } },
             }),
             this.prisma.auditLog.count({
                 where: {
                     createdAt: { gte: oneHourAgo },
-                    action: {
-                        contains: 'ERROR',
-                    },
+                    OR: [
+                        { action: { contains: 'ERROR' } },
+                        { action: { contains: 'FAIL' } },
+                    ],
                 },
             }),
         ]);
 
-        return totalActions > 0 ? errorActions / totalActions : 0;
+        return {
+            totalActions,
+            errorActions,
+            rate: totalActions > 0 ? errorActions / totalActions : 0,
+        };
+    }
+
+    async getUserOverview360(userId: string) {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            include: {
+                profile: true,
+                subscription: true,
+                _count: {
+                    select: {
+                        periodCycles: true,
+                        dailyLogs: true,
+                        waterLogs: true,
+                        sleepLogs: true,
+                        stepsLogs: true,
+                        conversations: true,
+                        questions: true,
+                        answers: true,
+                        reminders: true,
+                    },
+                },
+            },
+        });
+
+        if (!user) {
+            throw new NotFoundException('Kullanıcı bulunamadı.');
+        }
+
+        const [recentCycles, ticketFlags] = await Promise.all([
+            this.prisma.periodCycle.findMany({
+                where: { userId },
+                orderBy: { startDate: 'desc' },
+                take: 3,
+            }),
+            this.prisma.featureFlag.findMany({
+                where: { key: { startsWith: 'support_ticket_' } },
+            }),
+        ]);
+
+        const userTickets = ticketFlags
+            .map((f) => f.valueJson as any)
+            .filter((t) => t && t.userId === userId)
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        const prefs = ((user.profile?.preferencesJson as Record<string, any>) || {});
+        const { password: _p, pinHash: _ph, ...safeUser } = user;
+
+        return {
+            user: safeUser,
+            hasPushToken: Boolean(prefs.pushToken),
+            partnerConnected: Boolean(prefs.partnerLink),
+            recentCycles,
+            supportTickets: userTickets,
+        };
+    }
+
+    async sendDirectPushToUser(userId: string, title: string, body: string) {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, email: true },
+        });
+        if (!user) {
+            throw new NotFoundException('Kullanıcı bulunamadı.');
+        }
+
+        const receipt = await this.pushService.sendPush(userId, {
+            to: '',
+            sound: 'default',
+            title: title.trim(),
+            body: body.trim(),
+            data: { type: 'ADMIN_DIRECT', screen: 'home' },
+        });
+
+        return {
+            userId,
+            email: user.email,
+            receipt,
+        };
     }
 }

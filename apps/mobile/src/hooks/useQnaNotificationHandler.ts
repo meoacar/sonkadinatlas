@@ -36,7 +36,7 @@ export function useQnaNotificationHandler() {
      * Handle notification received while app is in foreground
      */
     const handleNotificationReceived = (notification: Notifications.Notification) => {
-        const data = notification.request.content.data as QnaNotificationData;
+        const data = notification.request.content.data as unknown as QnaNotificationData;
 
         if (data.type === 'qna') {
             console.log('[QnA Notification] Received:', data.notificationType);
@@ -48,7 +48,7 @@ export function useQnaNotificationHandler() {
      * Handle notification tap (deep linking)
      */
     const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
-        const data = response.notification.request.content.data as QnaNotificationData;
+        const data = response.notification.request.content.data as unknown as QnaNotificationData;
 
         if (data.type !== 'qna') {
             return; // Not a QnA notification

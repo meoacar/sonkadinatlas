@@ -1,8 +1,12 @@
 import { Controller, Get, Patch, Body, UseGuards, Post, BadRequestException, Req, Query, Param, Delete } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
+import { IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { SubscriptionStatus, SubscriptionTier, UserStatus } from '@prisma/client';
 import { UsersService } from './users.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { AdminGuard } from '../common/guards/admin.guard';
 import * as fs from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
@@ -11,56 +15,168 @@ import { pipeline } from 'stream';
 const pump = promisify(pipeline);
 
 class UpdateProfileDto {
+  @IsOptional()
+  @IsString()
   firstName?: string;
+
+  @IsOptional()
+  @IsString()
   lastName?: string;
+
+  @IsOptional()
+  @IsString()
   email?: string;
-  dateOfBirth?: string; // ISO date string
+
+  @IsOptional()
+  @IsString()
+  dateOfBirth?: string | null; // ISO date string
+
+  @IsOptional()
+  @IsNumber()
   heightCm?: number;
+
+  @IsOptional()
+  @IsNumber()
   weightKg?: number;
+
+  @IsOptional()
+  @IsString()
   country?: string;
+
+  @IsOptional()
+  @IsString()
   timezone?: string;
-  profilePictureUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  profilePictureUrl?: string | null;
+
+  @IsOptional()
   preferencesJson?: any;
 }
 
 class UpdateUsernameDto {
+  @IsString()
+  @IsNotEmpty()
   username!: string;
 }
 
+class ProfileUpdateDto {
+  @IsOptional()
+  @IsString()
+  firstName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  lastName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  displayName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  dateOfBirth?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  heightCm?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  weightKg?: number | null;
+
+  @IsOptional()
+  @IsString()
+  country?: string | null;
+
+  @IsOptional()
+  @IsString()
+  timezone?: string | null;
+}
+
 class UpdateUserDto {
+  @IsOptional()
+  @IsEmail()
   email?: string;
-  username?: string;
-  status?: string;
+
+  @IsOptional()
+  @IsString()
+  username?: string | null;
+
+  @IsOptional()
+  @IsEnum(UserStatus)
+  status?: UserStatus;
+
+  @IsOptional()
+  @IsBoolean()
   isAdmin?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   pinEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
   newPassword?: string;
+
+  @IsOptional()
+  @IsString()
   confirmPassword?: string;
-  profile?: {
-    firstName?: string;
-    lastName?: string;
-    displayName?: string;
-    dateOfBirth?: string;
-    heightCm?: number;
-    weightKg?: number;
-    country?: string;
-    timezone?: string;
-  };
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ProfileUpdateDto)
+  profile?: ProfileUpdateDto;
+}
+
+class AdminUpdateUserSubscriptionDto {
+  @IsOptional()
+  @IsEnum(SubscriptionStatus)
+  status?: SubscriptionStatus;
+
+  @IsOptional()
+  @IsEnum(SubscriptionTier)
+  tier?: SubscriptionTier | null;
+
+  @IsOptional()
+  @IsString()
+  endDate?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  aiMessagesLimit?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  resetAiUsage?: boolean;
 }
 
 class SetupPinDto {
+  @IsString()
+  @IsNotEmpty()
   pin!: string;
 }
 
 class VerifyPinDto {
+  @IsString()
+  @IsNotEmpty()
   pin!: string;
 }
 
 class DisablePinDto {
+  @IsString()
+  @IsNotEmpty()
   pin!: string;
 }
 
 class ChangePinDto {
+  @IsString()
+  @IsNotEmpty()
   oldPin!: string;
+
+  @IsString()
+  @IsNotEmpty()
   newPin!: string;
 }
 
@@ -119,9 +235,31 @@ export class UsersController {
     return this.usersService.exportUserData(user.id);
   }
 
+  @Get('me/retention-offer')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get active in-app retention offer & heartbeat' })
+  async getMyRetentionOffer(@CurrentUser() user: any) {
+    return this.usersService.getMyRetentionOffer(user.id);
+  }
+
+  @Post('me/retention-offer/ack')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Dismiss or claim retention offer' })
+  async ackMyRetentionOffer(
+    @CurrentUser() user: any,
+    @Body() body: { action?: 'dismiss' | 'claim' },
+  ) {
+    return this.usersService.ackMyRetentionOffer(
+      user.id,
+      body?.action === 'claim' ? 'claim' : 'dismiss',
+    );
+  }
+
   // Admin endpoints
   @Post('users')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), AdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create user (Admin)' })
   async createUser(@Body() dto: any) {
@@ -129,7 +267,7 @@ export class UsersController {
   }
 
   @Get('users')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), AdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get all users (Admin)' })
   async getAllUsers(
@@ -142,7 +280,7 @@ export class UsersController {
   }
 
   @Get('users/:id')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), AdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get user by ID (Admin)' })
   async getUserById(@Param('id') id: string) {
@@ -150,15 +288,34 @@ export class UsersController {
   }
 
   @Patch('users/:id')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), AdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update user (Admin)' })
   async updateUser(@Param('id') id: string, @Body() dto: UpdateUserDto) {
     return this.usersService.updateUser(id, dto);
   }
 
+  @Patch('users/:id/subscription')
+  @UseGuards(AuthGuard('jwt'), AdminGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Upsert or update user subscription (Admin)' })
+  async updateUserSubscription(
+    @Param('id') id: string,
+    @Body() dto: AdminUpdateUserSubscriptionDto,
+  ) {
+    return this.usersService.adminUpdateUserSubscription(id, dto);
+  }
+
+  @Get('users/:id/export')
+  @UseGuards(AuthGuard('jwt'), AdminGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Export user KVKK data (Admin)' })
+  async exportUserDataAdmin(@Param('id') id: string) {
+    return this.usersService.exportUserData(id);
+  }
+
   @Delete('users/:id')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), AdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete user (Admin)' })
   async deleteUser(@Param('id') id: string) {

@@ -23,13 +23,23 @@ export default function ModelPolicyCreate() {
 
     const providers = providersData?.data || [];
 
-    const providerOptions = providers
+    const activeDbProviders = providers
         .filter((p: any) => p.isActive)
         .map((p: any) => ({
             label: `${getProviderIcon(p.provider)} ${p.displayName}`,
             value: p.provider,
             modelName: p.modelName,
         }));
+
+    const providerOptions =
+        activeDbProviders.length > 0
+            ? activeDbProviders
+            : [
+                { label: '🔷 Google Gemini', value: 'google', modelName: 'gemini-2.5-flash' },
+                { label: '🤖 OpenAI', value: 'openai', modelName: 'gpt-4o-mini' },
+                { label: '🧠 Anthropic', value: 'anthropic', modelName: 'claude-3-5-sonnet-20241022' },
+                { label: '⚡ DeepSeek', value: 'deepseek', modelName: 'deepseek-chat' },
+            ];
 
     function getProviderIcon(provider: string) {
         const icons: Record<string, string> = {
@@ -67,8 +77,10 @@ export default function ModelPolicyCreate() {
                         placeholder="AI sağlayıcı seçiniz"
                         onChange={(value) => {
                             // Auto-fill model name from selected provider
-                            const selectedProvider = providers.find((p: any) => p.provider === value);
-                            if (selectedProvider) {
+                            const selectedProvider =
+                                providers.find((p: any) => p.provider === value) ||
+                                providerOptions.find((p: any) => p.value === value);
+                            if (selectedProvider?.modelName) {
                                 formProps.form?.setFieldValue('modelName', selectedProvider.modelName);
                             }
                         }}
@@ -119,7 +131,17 @@ export default function ModelPolicyCreate() {
                 <Form.Item
                     label="Etkin Araçlar (JSON)"
                     name="toolsEnabledJson"
-                    initialValue="[]"
+                    initialValue={[]}
+                    getValueProps={(value) => ({
+                        value: typeof value === 'string' ? value : JSON.stringify(value || []),
+                    })}
+                    normalize={(value) => {
+                        try {
+                            return JSON.parse(value);
+                        } catch {
+                            return value;
+                        }
+                    }}
                     tooltip="Etkin araçların JSON dizisi (Örn: ['web_search', 'calculator'])"
                 >
                     <Input.TextArea

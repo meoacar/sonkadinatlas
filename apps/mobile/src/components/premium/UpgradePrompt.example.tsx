@@ -90,7 +90,7 @@ export function CustomThemePromptExample() {
     const { canUseFeature } = usePremium();
 
     const handleCustomizeTheme = () => {
-        if (!canUseFeature('custom_themes')) {
+        if (!canUseFeature('customization')) {
             setShowPrompt(true);
             return;
         }

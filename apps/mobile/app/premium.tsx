@@ -1,16 +1,20 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     View,
     Text,
     StyleSheet,
     ScrollView,
     TouchableOpacity,
-    SafeAreaView,
     Platform,
     Linking,
     Alert,
+    ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { useTheme } from '@/hooks/useTheme';
 import { usePremium } from '@/hooks/usePremium';
 import { PremiumBadge } from '@/components/premium/PremiumBadge';
@@ -18,24 +22,77 @@ import { TierSelector } from '@/components/premium/TierSelector';
 import { FeaturesComparison } from '@/components/premium/FeaturesComparison';
 import { BenefitsSection } from '@/components/premium/BenefitsSection';
 import { FAQSection } from '@/components/premium/FAQSection';
-import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { subscriptionService } from '@/services/api';
 import { iapManager } from '@/services/iap.wrapper';
-import type { SubscriptionTier } from '@/types/subscription';
+import type { SubscriptionTier, PremiumPaywallConfig } from '@/types/subscription';
 
 export default function PremiumScreen() {
     const router = useRouter();
+    const params = useLocalSearchParams<{ tier?: string; fromOnboarding?: string }>();
     const theme = useTheme();
     const queryClient = useQueryClient();
     const { subscription, isPremium, isLoading } = usePremium();
-    const [selectedTier, setSelectedTier] = useState<SubscriptionTier>('YEARLY');
+    const [selectedTier, setSelectedTier] = useState<SubscriptionTier>(
+        params.tier === 'MONTHLY' ? 'MONTHLY' : 'YEARLY',
+    );
     const [isPurchasing, setIsPurchasing] = useState(false);
 
-    // Fetch products
+    const { data: paywallConfig } = useQuery<PremiumPaywallConfig>({
+        queryKey: ['subscription', 'paywall-config'],
+        queryFn: () => subscriptionService.getPaywallConfig(),
+        staleTime: 60 * 1000,
+        refetchOnMount: 'always',
+    });
+
     const { data: products } = useQuery({
         queryKey: ['products', Platform.OS],
         queryFn: () => subscriptionService.getProducts(Platform.OS as 'ios' | 'android'),
     });
+
+    useEffect(() => {
+        if (params.tier === 'MONTHLY' || params.tier === 'YEARLY') {
+            setSelectedTier(params.tier);
+            return;
+        }
+        if (paywallConfig?.defaultSelectedTier) {
+            const preferred = paywallConfig.defaultSelectedTier;
+            if (paywallConfig.plans?.[preferred]?.isActive !== false) {
+                setSelectedTier(preferred);
+            } else {
+                const fallback: SubscriptionTier = preferred === 'YEARLY' ? 'MONTHLY' : 'YEARLY';
+                setSelectedTier(fallback);
+            }
+        }
+    }, [paywallConfig?.defaultSelectedTier, paywallConfig?.plans]);
+
+    const monthlyProduct = products?.find((p) => p.productId.toLowerCase().includes('monthly'));
+    const yearlyProduct = products?.find((p) => p.productId.toLowerCase().includes('yearly'));
+
+    const monthlyPlan = paywallConfig?.plans?.MONTHLY;
+    const yearlyPlan = paywallConfig?.plans?.YEARLY;
+
+    const monthlyPrice = monthlyPlan
+        ? `${monthlyPlan.currencySymbol || '₺'}${monthlyPlan.price}`
+        : monthlyProduct?.localizedPrice || monthlyProduct?.price || '₺99';
+    const yearlyPrice = yearlyPlan
+        ? `${yearlyPlan.currencySymbol || '₺'}${yearlyPlan.price}`
+        : yearlyProduct?.localizedPrice || yearlyProduct?.price || '₺999';
+    const selectedPrice = selectedTier === 'YEARLY' ? yearlyPrice : monthlyPrice;
+    const activePlan = selectedTier === 'YEARLY' ? yearlyPlan : monthlyPlan;
+
+    const heroEyebrow = paywallConfig?.heroEyebrow || 'KADIN SAĞLIĞI ASİSTANI';
+    const heroTitle = paywallConfig?.heroTitle || "NOVA Premium'a Geç";
+    const heroSubtitle =
+        paywallConfig?.heroSubtitle ||
+        'Gelişmiş AI hafızası, kişisel sağlık içgörüleri ve yüksek mesaj kotasıyla sağlığını bir üst seviyeye taşı.';
+    const heroHighlights =
+        paywallConfig?.heroHighlights?.length
+            ? paywallConfig.heroHighlights
+            : ['1000+ Mesaj', 'Kişisel İçgörü', 'Astroloji'];
+    const showTrialBanner =
+        !isPremium &&
+        !subscription?.hasHadTrial &&
+        (paywallConfig?.trialEnabled ?? true);
 
     const styles = createStyles(theme);
 
@@ -44,103 +101,68 @@ export default function PremiumScreen() {
 
         setIsPurchasing(true);
         try {
-            // Initialize IAP if not already initialized
             if (!iapManager.isReady()) {
-                console.log('[Premium] Initializing IAP...');
                 await iapManager.initialize();
             }
 
-            // Request purchase from IAP
-            // Note: The actual purchase result will come through the IAP listener
-            // which is handled in the IAP service
             await iapManager.purchase(selectedTier);
 
-            // After successful purchase, the IAP service will validate with backend
-            // and we'll invalidate queries to refresh subscription status
-            await queryClient.invalidateQueries({ queryKey: ['subscription'] });
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ['subscription'] }),
+                queryClient.invalidateQueries({ queryKey: ['nova', 'quota'] }),
+                queryClient.invalidateQueries({ queryKey: ['usage-stats'] }),
+            ]);
 
-            // Navigate to success screen
             router.push('/premium/success');
         } catch (error: any) {
             console.error('Purchase error:', error);
 
-            // Handle IAPServiceError with user-friendly messages
             if (error.name === 'IAPServiceError') {
                 const userMessage = error.getUserMessage ? error.getUserMessage() : error.message;
 
-                // User cancelled - don't show error, just log
                 if (error.code === 'USER_CANCELLED') {
-                    console.log('[Premium] User cancelled purchase');
                     return;
                 }
 
-                // Already owned - offer restore
                 if (error.code === 'ALREADY_OWNED') {
-                    Alert.alert(
-                        'Zaten Sahipsiniz',
-                        userMessage,
-                        [
-                            { text: 'İptal', style: 'cancel' },
-                            {
-                                text: 'Geri Yükle',
-                                onPress: handleRestore,
-                            },
-                        ]
-                    );
+                    Alert.alert('Zaten Sahipsiniz', userMessage, [
+                        { text: 'İptal', style: 'cancel' },
+                        { text: 'Geri Yükle', onPress: handleRestore },
+                    ]);
                     return;
                 }
 
-                // Network error - offer retry
                 if (error.code === 'NETWORK_ERROR' || error.isRecoverable?.()) {
-                    Alert.alert(
-                        'Bağlantı Hatası',
-                        userMessage,
-                        [
-                            { text: 'İptal', style: 'cancel' },
-                            {
-                                text: 'Tekrar Dene',
-                                onPress: handlePurchase,
-                            },
-                        ]
-                    );
+                    Alert.alert('Bağlantı Hatası', userMessage, [
+                        { text: 'İptal', style: 'cancel' },
+                        { text: 'Tekrar Dene', onPress: handlePurchase },
+                    ]);
                     return;
                 }
 
-                // Requires user action
                 if (error.requiresUserAction?.()) {
-                    Alert.alert(
-                        'İşlem Gerekli',
-                        userMessage,
-                        [
-                            { text: 'Tamam' },
-                            {
-                                text: 'Ayarlar',
-                                onPress: () => {
-                                    // Open device settings
-                                    if (Platform.OS === 'ios') {
-                                        Linking.openURL('app-settings:');
-                                    } else {
-                                        Linking.openSettings();
-                                    }
-                                },
+                    Alert.alert('İşlem Gerekli', userMessage, [
+                        { text: 'Tamam' },
+                        {
+                            text: 'Ayarlar',
+                            onPress: () => {
+                                if (Platform.OS === 'ios') {
+                                    Linking.openURL('app-settings:');
+                                } else {
+                                    Linking.openSettings();
+                                }
                             },
-                        ]
-                    );
+                        },
+                    ]);
                     return;
                 }
 
-                // Generic error
-                Alert.alert(
-                    'Satın Alma Başarısız',
-                    userMessage,
-                    [{ text: 'Tamam' }]
-                );
+                Alert.alert('Satın Alma Başarısız', userMessage, [{ text: 'Tamam' }]);
             } else {
-                // Non-IAP error
                 Alert.alert(
                     'Hata',
                     error.message || 'Bir hata oluştu. Lütfen tekrar deneyin.',
-                    [{ text: 'Tamam' }]
+                    [{ text: 'Tamam' }],
                 );
             }
         } finally {
@@ -149,71 +171,50 @@ export default function PremiumScreen() {
     };
 
     const handleRestore = async () => {
+        if (isPurchasing) return;
         setIsPurchasing(true);
         try {
-            // Initialize IAP if not already initialized
             if (!iapManager.isReady()) {
-                console.log('[Premium] Initializing IAP...');
                 await iapManager.initialize();
             }
 
-            console.log('[Premium] Restoring purchases...');
             const restoredPurchases = await iapManager.restorePurchases();
 
             if (restoredPurchases.length === 0) {
                 Alert.alert(
                     'Satın Alım Bulunamadı',
-                    'Geri yüklenecek satın alım bulunamadı. Eğer daha önce satın aldıysanız, lütfen aynı Apple ID veya Google hesabıyla giriş yaptığınızdan emin olun.',
-                    [{ text: 'Tamam' }]
+                    'Geri yüklenecek satın alım bulunamadı. Daha önce satın aldıysanız aynı Apple ID veya Google hesabıyla giriş yaptığınızdan emin olun.',
+                    [{ text: 'Tamam' }],
                 );
             } else {
-                // Refresh subscription status
-                await queryClient.invalidateQueries({ queryKey: ['subscription'] });
+                await Promise.all([
+                    queryClient.invalidateQueries({ queryKey: ['subscription'] }),
+                    queryClient.invalidateQueries({ queryKey: ['nova', 'quota'] }),
+                    queryClient.invalidateQueries({ queryKey: ['usage-stats'] }),
+                ]);
 
-                Alert.alert(
-                    'Başarılı!',
-                    'Satın alımlarınız geri yüklendi.',
-                    [
-                        {
-                            text: 'Tamam',
-                            onPress: () => router.push('/(tabs)/home'),
-                        },
-                    ]
-                );
+                Alert.alert('Başarılı!', 'Satın alımlarınız geri yüklendi.', [
+                    { text: 'Tamam', onPress: () => router.push('/(tabs)/home') },
+                ]);
             }
         } catch (error: any) {
             console.error('Restore error:', error);
 
-            // Handle IAPServiceError
             if (error.name === 'IAPServiceError') {
                 const userMessage = error.getUserMessage ? error.getUserMessage() : error.message;
-
-                // Network error - offer retry
                 if (error.code === 'NETWORK_ERROR' || error.isRecoverable?.()) {
-                    Alert.alert(
-                        'Bağlantı Hatası',
-                        userMessage,
-                        [
-                            { text: 'İptal', style: 'cancel' },
-                            {
-                                text: 'Tekrar Dene',
-                                onPress: handleRestore,
-                            },
-                        ]
-                    );
+                    Alert.alert('Bağlantı Hatası', userMessage, [
+                        { text: 'İptal', style: 'cancel' },
+                        { text: 'Tekrar Dene', onPress: handleRestore },
+                    ]);
                     return;
                 }
-
-                Alert.alert(
-                    'Geri Yükleme Başarısız',
-                    userMessage,
-                    [{ text: 'Tamam' }]
-                );
+                Alert.alert('Geri Yükleme Başarısız', userMessage, [{ text: 'Tamam' }]);
             } else {
                 Alert.alert(
                     'Hata',
                     error.message || 'Geri yükleme başarısız oldu. Lütfen tekrar deneyin.',
-                    [{ text: 'Tamam' }]
+                    [{ text: 'Tamam' }],
                 );
             }
         } finally {
@@ -221,149 +222,233 @@ export default function PremiumScreen() {
         }
     };
 
-
-
     const handleManageSubscription = () => {
-        const url = Platform.OS === 'ios'
-            ? 'https://apps.apple.com/account/subscriptions'
-            : 'https://play.google.com/store/account/subscriptions';
+        const url =
+            Platform.OS === 'ios'
+                ? 'https://apps.apple.com/account/subscriptions'
+                : 'https://play.google.com/store/account/subscriptions';
 
         Linking.openURL(url);
     };
 
-    const handleTerms = () => {
-        router.push('/settings/terms-of-service' as any);
-    };
-
-    const handlePrivacy = () => {
-        router.push('/settings/privacy-policy' as any);
-    };
-
     if (isLoading) {
         return (
-            <SafeAreaView style={styles.container}>
+            <SafeAreaView style={styles.container} edges={['top']}>
                 <View style={styles.loadingContainer}>
-                    <Text style={styles.loadingText}>Yükleniyor...</Text>
+                    <ActivityIndicator size="large" color={theme.colors.primary} />
+                    <Text style={styles.loadingText}>Üyelik bilgileri yükleniyor...</Text>
                 </View>
             </SafeAreaView>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container}>
-            <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-                {/* Header */}
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                        <Text style={styles.backButtonText}>←</Text>
+        <SafeAreaView style={styles.container} edges={['top']}>
+            {/* Top Bar */}
+            <View style={styles.topBar}>
+                <TouchableOpacity
+                    onPress={() => {
+                        if (params.fromOnboarding === '1') {
+                            router.replace('/(tabs)/home');
+                        } else {
+                            router.back();
+                        }
+                    }}
+                    style={styles.iconBtn}
+                    activeOpacity={0.7}
+                >
+                    <Ionicons name="chevron-back" size={22} color={theme.colors.text} />
+                </TouchableOpacity>
+                <Text style={styles.topBarTitle}>NOVA Premium</Text>
+                {!isPremium ? (
+                    <TouchableOpacity onPress={handleRestore} disabled={isPurchasing} style={styles.restorePill}>
+                        <Text style={styles.restorePillText}>Geri Yükle</Text>
                     </TouchableOpacity>
-                    <Text style={styles.title}>Premium'a Geç ✨</Text>
-                    <Text style={styles.subtitle}>
-                        Gelişmiş AI ve özel özelliklerle deneyiminizi geliştirin
+                ) : (
+                    <View style={styles.iconPlaceholder} />
+                )}
+            </View>
+
+            <ScrollView
+                style={styles.scrollView}
+                contentContainerStyle={[
+                    styles.scrollContent,
+                    !isPremium && { paddingBottom: 150 },
+                ]}
+                showsVerticalScrollIndicator={false}
+            >
+                {/* Hero Banner */}
+                <LinearGradient
+                    colors={[theme.colors.primary, theme.colors.primaryDark || '#6D28D9', '#EC4899']}
+                    style={styles.heroCard}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                >
+                    <View style={styles.heroPill}>
+                        <Ionicons name="sparkles" size={13} color="#FDE047" />
+                        <Text style={styles.heroPillText}>
+                            {isPremium ? 'AKTİF ÜYELİK' : heroEyebrow}
+                        </Text>
+                    </View>
+                    <Text style={styles.heroTitle}>
+                        {isPremium ? 'Premium Deneyimin Aktif' : heroTitle}
                     </Text>
-                </View>
+                    <Text style={styles.heroSubtitle}>
+                        {isPremium
+                            ? 'Gelişmiş AI yanıtları, kişisel içgörüler ve derin astroloji rehberliği açık.'
+                            : heroSubtitle}
+                    </Text>
+
+                    <View style={styles.heroHighlights}>
+                        {heroHighlights.slice(0, 3).map((highlight, idx) => (
+                            <View key={`${highlight}-${idx}`} style={styles.highlightChip}>
+                                <Ionicons
+                                    name={idx === 0 ? 'chatbubbles' : idx === 1 ? 'bulb' : 'planet'}
+                                    size={13}
+                                    color="#FFFFFF"
+                                />
+                                <Text style={styles.highlightText}>{highlight}</Text>
+                            </View>
+                        ))}
+                    </View>
+                </LinearGradient>
 
                 {/* Current Status Card (if premium) */}
                 {isPremium && subscription && (
                     <View style={styles.statusCard}>
                         <View style={styles.statusHeader}>
                             <PremiumBadge size="medium" variant="full" />
-                            <Text style={styles.statusTitle}>Premium Üye</Text>
+                            <Text style={styles.statusTitle}>Üyelik Detayları</Text>
                         </View>
                         <View style={styles.statusDetails}>
                             <View style={styles.statusRow}>
-                                <Text style={styles.statusLabel}>Plan:</Text>
+                                <Text style={styles.statusLabel}>Plan</Text>
                                 <Text style={styles.statusValue}>
-                                    {subscription.tier === 'YEARLY' ? 'Yıllık' : 'Aylık'}
+                                    {subscription.tier === 'YEARLY' ? 'Yıllık Premium' : 'Aylık Premium'}
                                 </Text>
                             </View>
                             <View style={styles.statusRow}>
-                                <Text style={styles.statusLabel}>Yenileme:</Text>
+                                <Text style={styles.statusLabel}>Yenileme Tarihi</Text>
                                 <Text style={styles.statusValue}>
                                     {subscription.endDate
-                                        ? new Date(subscription.endDate).toLocaleDateString('tr-TR')
-                                        : '-'}
+                                        ? new Date(subscription.endDate).toLocaleDateString('tr-TR', {
+                                              day: 'numeric',
+                                              month: 'long',
+                                              year: 'numeric',
+                                          })
+                                        : '—'}
                                 </Text>
                             </View>
                         </View>
-                        <TouchableOpacity
-                            style={styles.manageButton}
-                            onPress={handleManageSubscription}
-                        >
-                            <Text style={styles.manageButtonText}>Aboneliği Yönet</Text>
-                        </TouchableOpacity>
+
+                        <View style={styles.statusActions}>
+                            <TouchableOpacity
+                                style={styles.statsButton}
+                                onPress={() => router.push('/premium/stats' as any)}
+                                activeOpacity={0.8}
+                            >
+                                <Ionicons name="bar-chart-outline" size={17} color="#FFFFFF" />
+                                <Text style={styles.statsButtonText}>Kullanım İstatistikleri</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.manageButton}
+                                onPress={handleManageSubscription}
+                                activeOpacity={0.8}
+                            >
+                                <Ionicons name="settings-outline" size={17} color={theme.colors.primary} />
+                                <Text style={styles.manageButtonText}>Aboneliği Yönet</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 )}
 
                 {/* Tier Selector */}
                 {!isPremium && (
                     <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Plan Seçin</Text>
+                        <Text style={styles.sectionTitle}>Planını Seç</Text>
                         <TierSelector
                             selectedTier={selectedTier}
                             onSelectTier={setSelectedTier}
-                            monthlyPrice={products?.find(p => p.productId.includes('monthly'))?.price || '₺99'}
-                            yearlyPrice={products?.find(p => p.productId.includes('yearly'))?.price || '₺999'}
+                            monthlyPrice={monthlyPrice}
+                            yearlyPrice={yearlyPrice}
+                            monthlyPlan={monthlyPlan}
+                            yearlyPlan={yearlyPlan}
                         />
                     </View>
                 )}
 
+                {/* Trial Info Banner */}
+                {showTrialBanner && (
+                    <View style={styles.trialInfo}>
+                        <View style={styles.trialIconCircle}>
+                            <Ionicons name="gift-outline" size={20} color={theme.colors.primary} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.trialTitle}>
+                                {paywallConfig?.trialTitle || '7 Gün Ücretsiz Deneme'}
+                            </Text>
+                            <Text style={styles.trialText}>
+                                {paywallConfig?.trialDescription ||
+                                    'Ücret ödemeden dene, memnun kalmazsan istediğin zaman tek dokunuşla iptal et.'}
+                            </Text>
+                        </View>
+                    </View>
+                )}
+
+                {/* Benefits Grid */}
+                <View style={styles.section}>
+                    <BenefitsSection items={paywallConfig?.benefits} />
+                </View>
+
                 {/* Features Comparison */}
                 <View style={styles.section}>
-                    <FeaturesComparison />
+                    <FeaturesComparison rows={paywallConfig?.comparisonRows} />
                 </View>
-
-                {/* Benefits Section */}
-                <View style={styles.section}>
-                    <BenefitsSection />
-                </View>
-
-                {/* Trial Info */}
-                {!isPremium && !subscription?.hasHadTrial && (
-                    <View style={styles.trialInfo}>
-                        <Text style={styles.trialIcon}>🎁</Text>
-                        <Text style={styles.trialText}>
-                            7 gün ücretsiz deneyin, istediğiniz zaman iptal edin
-                        </Text>
-                    </View>
-                )}
-
-                {/* CTA Button */}
-                {!isPremium && (
-                    <View style={styles.ctaContainer}>
-                        <TouchableOpacity
-                            style={[styles.ctaButton, isPurchasing && styles.ctaButtonDisabled]}
-                            onPress={handlePurchase}
-                            disabled={isPurchasing}
-                            activeOpacity={0.8}
-                        >
-                            <Text style={styles.ctaButtonText}>
-                                {isPurchasing ? 'İşleniyor...' : 'Premium\'a Başla'}
-                            </Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={styles.restoreButton}
-                            onPress={handleRestore}
-                            disabled={isPurchasing}
-                            activeOpacity={0.7}
-                        >
-                            <Text style={styles.restoreButtonText}>
-                                Satın Alımları Geri Yükle
-                            </Text>
-                        </TouchableOpacity>
-
-                        <Text style={styles.ctaNote}>
-                            Abonelik otomatik olarak yenilenir. İstediğiniz zaman iptal edebilirsiniz.
-                        </Text>
-                    </View>
-                )}
 
                 {/* FAQ Section */}
                 <View style={styles.section}>
-                    <FAQSection />
+                    <FAQSection faqs={paywallConfig?.faqs} />
                 </View>
             </ScrollView>
+
+            {/* Sticky Bottom CTA Bar */}
+            {!isPremium && (
+                <View style={styles.stickyFooter}>
+                    <View style={styles.footerSummaryRow}>
+                        <Text style={styles.footerPlanName}>
+                            {activePlan?.title || (selectedTier === 'YEARLY' ? 'Yıllık Plan' : 'Aylık Plan')}
+                        </Text>
+                        <Text style={styles.footerPlanPrice}>
+                            {selectedPrice} / {selectedTier === 'YEARLY' ? 'yıl' : 'ay'}
+                        </Text>
+                    </View>
+
+                    <TouchableOpacity
+                        style={[styles.ctaButton, isPurchasing && styles.ctaButtonDisabled]}
+                        onPress={handlePurchase}
+                        disabled={isPurchasing}
+                        activeOpacity={0.85}
+                    >
+                        {isPurchasing ? (
+                            <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                            <>
+                                <Ionicons name="sparkles" size={18} color="#FFFFFF" />
+                                <Text style={styles.ctaButtonText}>
+                                    {showTrialBanner
+                                        ? paywallConfig?.ctaTrialButtonText || '7 Gün Ücretsiz Başla'
+                                        : paywallConfig?.ctaButtonText || "Premium'a Başla"}
+                                </Text>
+                            </>
+                        )}
+                    </TouchableOpacity>
+
+                    <Text style={styles.ctaNote}>
+                        {paywallConfig?.ctaFooterNote ||
+                            'Otomatik yenilenir • İstediğin zaman iptal edebilirsin'}
+                    </Text>
+                </View>
+            )}
         </SafeAreaView>
     );
 }
@@ -374,158 +459,272 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
             flex: 1,
             backgroundColor: theme.colors.background,
         },
-        scrollView: {
-            flex: 1,
+        topBar: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingHorizontal: 16,
+            paddingVertical: 10,
+        },
+        iconBtn: {
+            width: 38,
+            height: 38,
+            borderRadius: 12,
+            backgroundColor: theme.colors.backgroundCard,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
+        iconPlaceholder: {
+            width: 72,
+        },
+        topBarTitle: {
+            fontSize: 17,
+            fontWeight: '700',
+            color: theme.colors.text,
+        },
+        restorePill: {
+            paddingHorizontal: 10,
+            paddingVertical: 7,
+            borderRadius: 10,
+            backgroundColor: theme.colors.backgroundCard,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+        },
+        restorePillText: {
+            fontSize: 12,
+            fontWeight: '600',
+            color: theme.colors.primary,
         },
         loadingContainer: {
             flex: 1,
             justifyContent: 'center',
             alignItems: 'center',
+            gap: 10,
         },
         loadingText: {
-            ...theme.typography.body,
+            fontSize: 14,
             color: theme.colors.textSecondary,
         },
-        header: {
-            padding: theme.spacing.xl,
-            paddingTop: theme.spacing.md,
+        scrollView: {
+            flex: 1,
         },
-        backButton: {
-            width: 40,
-            height: 40,
-            justifyContent: 'center',
+        scrollContent: {
+            paddingHorizontal: 16,
+            paddingBottom: 40,
+            gap: 18,
+        },
+        heroCard: {
+            borderRadius: 24,
+            padding: 20,
+        },
+        heroPill: {
+            flexDirection: 'row',
             alignItems: 'center',
-            marginBottom: theme.spacing.md,
+            gap: 5,
+            alignSelf: 'flex-start',
+            backgroundColor: 'rgba(255, 255, 255, 0.18)',
+            paddingHorizontal: 10,
+            paddingVertical: 5,
+            borderRadius: 12,
+            marginBottom: 12,
         },
-        backButtonText: {
-            fontSize: 28,
-            color: theme.colors.text,
+        heroPillText: {
+            fontSize: 10.5,
+            fontWeight: '800',
+            color: '#FFFFFF',
+            letterSpacing: 0.6,
         },
-        title: {
-            ...theme.typography.title,
-            color: theme.colors.text,
-            marginBottom: theme.spacing.sm,
+        heroTitle: {
+            fontSize: 24,
+            fontWeight: '800',
+            color: '#FFFFFF',
+            marginBottom: 6,
         },
-        subtitle: {
-            ...theme.typography.body,
-            color: theme.colors.textSecondary,
-            lineHeight: 22,
+        heroSubtitle: {
+            fontSize: 13.5,
+            color: 'rgba(255, 255, 255, 0.9)',
+            lineHeight: 20,
+            marginBottom: 14,
+        },
+        heroHighlights: {
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: 8,
+        },
+        highlightChip: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 5,
+            backgroundColor: 'rgba(255, 255, 255, 0.18)',
+            paddingHorizontal: 10,
+            paddingVertical: 5,
+            borderRadius: 12,
+        },
+        highlightText: {
+            fontSize: 12,
+            fontWeight: '600',
+            color: '#FFFFFF',
         },
         statusCard: {
             backgroundColor: theme.colors.backgroundCard,
-            marginHorizontal: theme.spacing.xl,
-            marginBottom: theme.spacing.xl,
-            padding: theme.spacing.lg,
-            borderRadius: theme.card.borderRadius,
-            borderWidth: 2,
+            padding: 16,
+            borderRadius: 18,
+            borderWidth: 1.5,
             borderColor: theme.colors.primary,
+            gap: 12,
         },
         statusHeader: {
             flexDirection: 'row',
             alignItems: 'center',
-            gap: theme.spacing.sm,
-            marginBottom: theme.spacing.md,
+            gap: 10,
         },
         statusTitle: {
-            ...theme.typography.subtitle,
+            fontSize: 16,
+            fontWeight: '700',
             color: theme.colors.text,
         },
         statusDetails: {
-            gap: theme.spacing.sm,
-            marginBottom: theme.spacing.md,
+            gap: 8,
+            paddingVertical: 8,
+            borderTopWidth: 1,
+            borderBottomWidth: 1,
+            borderColor: theme.colors.border,
         },
         statusRow: {
             flexDirection: 'row',
             justifyContent: 'space-between',
         },
         statusLabel: {
-            ...theme.typography.body,
+            fontSize: 13.5,
             color: theme.colors.textSecondary,
         },
         statusValue: {
-            ...theme.typography.body,
+            fontSize: 13.5,
             color: theme.colors.text,
-            fontWeight: '600',
+            fontWeight: '700',
         },
-        manageButton: {
-            backgroundColor: theme.colors.backgroundSecondary,
-            padding: theme.spacing.md,
-            borderRadius: theme.card.borderRadius,
-            alignItems: 'center',
+        statusActions: {
+            flexDirection: 'row',
+            gap: 10,
         },
-        manageButtonText: {
-            ...theme.typography.body,
-            color: theme.colors.primary,
-            fontWeight: '600',
-        },
-        section: {
-            paddingHorizontal: theme.spacing.xl,
-            marginBottom: theme.spacing.xl,
-        },
-        sectionTitle: {
-            ...theme.typography.subtitle,
-            color: theme.colors.text,
-            marginBottom: theme.spacing.md,
-        },
-        trialInfo: {
-            backgroundColor: theme.colors.backgroundSecondary,
-            marginHorizontal: theme.spacing.xl,
-            marginBottom: theme.spacing.lg,
-            padding: theme.spacing.lg,
-            borderRadius: theme.card.borderRadius,
+        statsButton: {
+            flex: 1,
+            backgroundColor: theme.colors.primary,
+            paddingVertical: 12,
+            borderRadius: 12,
             flexDirection: 'row',
             alignItems: 'center',
-            gap: theme.spacing.md,
+            justifyContent: 'center',
+            gap: 6,
         },
-        trialIcon: {
-            fontSize: 32,
+        statsButtonText: {
+            color: '#FFFFFF',
+            fontWeight: '700',
+            fontSize: 13,
+        },
+        manageButton: {
+            flex: 1,
+            backgroundColor: theme.colors.background,
+            paddingVertical: 12,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+        },
+        manageButtonText: {
+            color: theme.colors.primary,
+            fontWeight: '700',
+            fontSize: 13,
+        },
+        section: {},
+        sectionTitle: {
+            fontSize: 16.5,
+            fontWeight: '700',
+            color: theme.colors.text,
+            marginBottom: 14,
+        },
+        trialInfo: {
+            backgroundColor: 'rgba(139, 92, 246, 0.08)',
+            borderWidth: 1,
+            borderColor: 'rgba(139, 92, 246, 0.2)',
+            padding: 14,
+            borderRadius: 16,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+        },
+        trialIconCircle: {
+            width: 40,
+            height: 40,
+            borderRadius: 12,
+            backgroundColor: theme.colors.backgroundCard,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
+        trialTitle: {
+            fontSize: 14,
+            fontWeight: '700',
+            color: theme.colors.text,
+            marginBottom: 2,
         },
         trialText: {
-            ...theme.typography.body,
-            color: theme.colors.text,
-            flex: 1,
-            lineHeight: 20,
+            fontSize: 12.5,
+            color: theme.colors.textSecondary,
+            lineHeight: 18,
         },
-        ctaContainer: {
-            paddingHorizontal: theme.spacing.xl,
-            marginBottom: theme.spacing.xl,
+        stickyFooter: {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: theme.colors.backgroundCard,
+            borderTopWidth: 1,
+            borderTopColor: theme.colors.border,
+            paddingHorizontal: 16,
+            paddingTop: 12,
+            paddingBottom: Platform.OS === 'ios' ? 26 : 14,
+            gap: 8,
+        },
+        footerSummaryRow: {
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+        },
+        footerPlanName: {
+            fontSize: 13,
+            fontWeight: '600',
+            color: theme.colors.textSecondary,
+        },
+        footerPlanPrice: {
+            fontSize: 14.5,
+            fontWeight: '800',
+            color: theme.colors.text,
         },
         ctaButton: {
             backgroundColor: theme.colors.primary,
-            padding: theme.spacing.lg,
-            borderRadius: theme.card.borderRadius,
+            paddingVertical: 14,
+            borderRadius: 14,
+            flexDirection: 'row',
             alignItems: 'center',
-            marginBottom: theme.spacing.md,
-            shadowColor: theme.colors.primary,
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.3,
-            shadowRadius: 8,
-            elevation: 4,
+            justifyContent: 'center',
+            gap: 8,
         },
         ctaButtonDisabled: {
-            opacity: 0.6,
+            opacity: 0.65,
         },
         ctaButtonText: {
-            ...theme.typography.subtitle,
-            color: theme.colors.textOnPrimary,
-            fontWeight: '700',
-            fontSize: 18,
-        },
-        restoreButton: {
-            padding: theme.spacing.md,
-            borderRadius: theme.card.borderRadius,
-            alignItems: 'center',
-            marginBottom: theme.spacing.md,
-        },
-        restoreButtonText: {
-            ...theme.typography.body,
-            color: theme.colors.primary,
-            fontWeight: '600',
+            color: '#FFFFFF',
+            fontWeight: '800',
+            fontSize: 16,
         },
         ctaNote: {
-            ...theme.typography.caption,
-            color: theme.colors.textSecondary,
+            fontSize: 11,
+            color: theme.colors.textLight,
             textAlign: 'center',
-            lineHeight: 16,
         },
     });

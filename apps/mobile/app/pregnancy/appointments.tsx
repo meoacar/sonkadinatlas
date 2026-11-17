@@ -37,7 +37,7 @@ export default function AppointmentsScreen() {
   const [glucose, setGlucose] = useState('');
 
   // Fetch appointments
-  const { data: appointments, isLoading } = useQuery({
+  const { data: appointments, isLoading } = useQuery<any[]>({
     queryKey: ['appointments'],
     queryFn: () => pregnancyService.getAppointments(),
   });

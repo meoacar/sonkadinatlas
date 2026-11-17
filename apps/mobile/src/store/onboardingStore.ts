@@ -26,6 +26,7 @@ export interface OnboardingData {
 
   // Step 5: Premium
   selectedPlan?: 'free' | 'premium';
+  selectedTier?: 'MONTHLY' | 'YEARLY';
 
   // Meta
   currentStep?: number;

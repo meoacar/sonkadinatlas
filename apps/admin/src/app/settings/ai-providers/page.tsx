@@ -1,10 +1,12 @@
 'use client';
 
 import { useTable, List, EditButton, DeleteButton, CreateButton } from '@refinedev/antd';
-import { Table, Tag, Space, Switch, Tooltip } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined, ApiOutlined } from '@ant-design/icons';
+import { Table, Tag, Space, Switch, Tooltip, Button, Alert, message } from 'antd';
+import { CheckCircleOutlined, CloseCircleOutlined, ApiOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { HttpError } from '@refinedev/core';
+import { apiClient } from '@/providers/dataProvider';
 
 interface AIProvider {
     id: string;
@@ -28,7 +30,8 @@ const providerInfo = {
 
 export default function AIProvidersList() {
     const router = useRouter();
-    const { tableProps } = useTable<AIProvider, HttpError>({
+    const [testingProvider, setTestingProvider] = useState<string | null>(null);
+    const { tableProps, tableQueryResult } = useTable<AIProvider, HttpError>({
         resource: 'ai-providers',
         syncWithLocation: true,
         meta: {
@@ -36,6 +39,32 @@ export default function AIProvidersList() {
             idField: 'provider',
         },
     });
+
+    const handleToggleActive = async (provider: string) => {
+        try {
+            await apiClient.post(`/ai-providers/${provider}/toggle`);
+            message.success(`"${provider}" durumu güncellendi`);
+            tableQueryResult?.refetch();
+        } catch (err: any) {
+            message.error(err?.response?.data?.message || 'Durum güncellenemedi');
+        }
+    };
+
+    const handleTestConnection = async (provider: string) => {
+        setTestingProvider(provider);
+        try {
+            const res = await apiClient.post(`/ai-providers/${provider}/test`);
+            if (res.data?.ok) {
+                message.success(`${provider} bağlantısı başarılı (${res.data.latencyMs}ms)`);
+            } else {
+                message.error(`${provider} test hatası: ${res.data?.error || 'Bağlanılamadı'}`);
+            }
+        } catch (err: any) {
+            message.error(err?.response?.data?.message || 'Test çalıştırılamadı');
+        } finally {
+            setTestingProvider(null);
+        }
+    };
 
     const columns = [
         {
@@ -78,13 +107,20 @@ export default function AIProvidersList() {
             dataIndex: 'isActive',
             key: 'isActive',
             align: 'center' as const,
-            render: (isActive: boolean) => (
-                <Tag
-                    icon={isActive ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
-                    color={isActive ? 'success' : 'default'}
-                >
-                    {isActive ? 'Aktif' : 'Pasif'}
-                </Tag>
+            render: (isActive: boolean, record: AIProvider) => (
+                <Space>
+                    <Switch
+                        checked={isActive}
+                        size="small"
+                        onChange={() => handleToggleActive(record.provider)}
+                    />
+                    <Tag
+                        icon={isActive ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+                        color={isActive ? 'success' : 'default'}
+                    >
+                        {isActive ? 'Aktif' : 'Pasif'}
+                    </Tag>
+                </Space>
             ),
         },
         {
@@ -102,6 +138,14 @@ export default function AIProvidersList() {
             align: 'center' as const,
             render: (_: any, record: AIProvider) => (
                 <Space>
+                    <Tooltip title="Bağlantıyı Test Et">
+                        <Button
+                            size="small"
+                            icon={<ThunderboltOutlined />}
+                            loading={testingProvider === record.provider}
+                            onClick={() => handleTestConnection(record.provider)}
+                        />
+                    </Tooltip>
                     <EditButton
                         hideText
                         size="small"
@@ -123,6 +167,13 @@ export default function AIProvidersList() {
                 />
             }
         >
+            <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="Çalışma Mantığı"
+                description="Burada aktif bir sağlayıcı tanımlıysa NOVA öncelikle buradaki API anahtarını ve modeli kullanır. Tablo boşsa sistem otomatik olarak sunucudaki (.env) yedek Google Gemini anahtarıyla çalışmaya devam eder."
+            />
             <Table {...tableProps} columns={columns} rowKey="provider" />
         </List>
     );

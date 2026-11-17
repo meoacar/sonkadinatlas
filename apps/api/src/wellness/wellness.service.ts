@@ -141,15 +141,10 @@ export class WellnessService {
       },
     });
 
-    // Update wellness log count if new entry
+    // Update gamification XP, streak, and wellness log count if new entry
     if (!existing) {
       try {
-        await this.prisma.userGamification.update({
-          where: { userId },
-          data: {
-            totalWellnessLogs: { increment: 1 },
-          },
-        });
+        await this.gamificationService.incrementDataEntry(userId, { wellness: true });
       } catch (error) {
         console.error('Error updating wellness log count:', error);
       }
@@ -236,14 +231,9 @@ export class WellnessService {
       },
     });
 
-    // Update wellness log count
+    // Update gamification XP, streak, and wellness log count
     try {
-      await this.prisma.userGamification.update({
-        where: { userId },
-        data: {
-          totalWellnessLogs: { increment: 1 },
-        },
-      });
+      await this.gamificationService.incrementDataEntry(userId, { wellness: true });
     } catch (error) {
       console.error('Error updating wellness log count:', error);
     }
@@ -346,15 +336,10 @@ export class WellnessService {
       },
     });
 
-    // Update wellness log count if new entry
+    // Update gamification XP, streak, and wellness log count if new entry
     if (!existing) {
       try {
-        await this.prisma.userGamification.update({
-          where: { userId },
-          data: {
-            totalWellnessLogs: { increment: 1 },
-          },
-        });
+        await this.gamificationService.incrementDataEntry(userId, { wellness: true });
       } catch (error) {
         console.error('Error updating wellness log count:', error);
       }

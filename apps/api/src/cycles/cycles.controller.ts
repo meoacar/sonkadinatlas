@@ -12,6 +12,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { CyclesService } from './cycles.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { AdminGuard } from '../common/guards/admin.guard';
 
 interface PeriodSymptoms {
   flow: 'light' | 'moderate' | 'heavy';
@@ -48,8 +49,30 @@ export class CyclesController {
     return this.cyclesService.getCycles(
       user.id,
       limit ? parseInt(limit) : undefined,
-      user.isAdmin,
+      false,
     );
+  }
+
+  @Get('admin/all')
+  @UseGuards(AdminGuard)
+  async getAllCyclesAdmin(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.cyclesService.getAdminCycles({
+      page: page ? parseInt(page, 10) : 1,
+      limit: limit ? parseInt(limit, 10) : 10,
+      search,
+      status,
+    });
+  }
+
+  @Get('admin/:id')
+  @UseGuards(AdminGuard)
+  async getCycleAdmin(@Param('id') id: string) {
+    return this.cyclesService.getAdminCycleById(id);
   }
 
   @Get('stats')
@@ -60,6 +83,11 @@ export class CyclesController {
   @Get('prediction')
   async getPrediction(@CurrentUser() user: any) {
     return this.cyclesService.getPrediction(user.id);
+  }
+
+  @Get('insights/patterns')
+  async getPatternInsights(@CurrentUser() user: any) {
+    return this.cyclesService.getPatternInsights(user.id);
   }
 
   @Get('calendar')

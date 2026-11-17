@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
@@ -173,7 +173,30 @@ export class AuthService {
     return this.login(user);
   }
 
+  private assertUserIsActive(user: { status?: string } | null) {
+    if (!user) {
+      throw new UnauthorizedException({
+        code: 'ACCOUNT_NOT_FOUND',
+        message: 'Kullanıcı bulunamadı.',
+      });
+    }
+    if (user.status === 'SUSPENDED') {
+      throw new ForbiddenException({
+        code: 'ACCOUNT_SUSPENDED',
+        message: 'Hesabınız yönetici tarafından askıya alınmıştır. Destek ekibiyle iletişime geçin.',
+      });
+    }
+    if (user.status && user.status !== 'ACTIVE') {
+      throw new UnauthorizedException({
+        code: 'ACCOUNT_DELETED',
+        message: 'Bu hesap kapatılmış veya silinmiştir.',
+      });
+    }
+  }
+
   async login(user: any) {
+    this.assertUserIsActive(user);
+
     const payload = { sub: user.id, email: user.email };
 
     const accessToken = this.jwtService.sign(payload, {
@@ -192,6 +215,10 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
+        status: user.status,
+        pinEnabled: Boolean(user.pinEnabled),
+        isAdmin: Boolean(user.isAdmin),
         profile: user.profile,
       },
     };
@@ -208,12 +235,13 @@ export class AuthService {
         include: { profile: true },
       });
 
-      if (!user) {
-        throw new UnauthorizedException('User not found');
-      }
+      this.assertUserIsActive(user);
 
       return this.login(user);
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        throw error;
+      }
       throw new UnauthorizedException('Invalid refresh token');
     }
   }

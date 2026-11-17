@@ -5,7 +5,7 @@ import { Question } from '@/types/qna';
 import { CategoryPill } from './CategoryPill';
 import { TagChip } from './TagChip';
 import { OptimizedAvatar } from './OptimizedAvatar';
-import { memo, useRef, useEffect } from 'react';
+import { memo, useRef } from 'react';
 import { haptics } from '@/utils/haptics';
 import { accessibility } from '@/utils/accessibility';
 
@@ -23,23 +23,15 @@ export const QuestionCard = memo(function QuestionCard({
     const theme = useTheme();
     const styles = createStyles(theme);
     const scaleAnim = useRef(new Animated.Value(1)).current;
-    const fadeAnim = useRef(new Animated.Value(0)).current;
 
     const answerCount = question._count?.answers || 0;
-    const hasAcceptedAnswer = question.status === 'ANSWERED';
-
-    // Fade in animation on mount
-    useEffect(() => {
-        Animated.timing(fadeAnim, {
-            toValue: 1,
-            duration: 300,
-            useNativeDriver: true,
-        }).start();
-    }, []);
+    const favoriteCount = question._count?.favorites || 0;
+    const isAnswered = question.status === 'ANSWERED';
+    const isClosed = question.status === 'CLOSED';
 
     const handlePressIn = () => {
         Animated.spring(scaleAnim, {
-            toValue: 0.98,
+            toValue: 0.985,
             useNativeDriver: true,
         }).start();
     };
@@ -47,8 +39,8 @@ export const QuestionCard = memo(function QuestionCard({
     const handlePressOut = () => {
         Animated.spring(scaleAnim, {
             toValue: 1,
-            friction: 3,
-            tension: 40,
+            friction: 4,
+            tension: 45,
             useNativeDriver: true,
         }).start();
     };
@@ -58,24 +50,22 @@ export const QuestionCard = memo(function QuestionCard({
         onPress();
     };
 
-    // Accessibility label
-    const accessibilityLabel = `${question.title}. ${question.isAnonymous ? accessibility.getAnonymousLabel() : `${question.user?.displayName} tarafından soruldu`
-        }. ${accessibility.getAnswerCountLabel(answerCount)}. ${accessibility.getViewCountLabel(question.viewCount)}. ${question.isPremium ? accessibility.getPremiumBadgeLabel() : ''
-        }`;
+    const accessibilityLabel = `${question.title}. ${
+        question.isAnonymous
+            ? accessibility.getAnonymousLabel()
+            : `${question.user?.displayName} tarafından soruldu`
+    }. ${accessibility.getAnswerCountLabel(answerCount)}. ${accessibility.getViewCountLabel(
+        question.viewCount
+    )}.`;
 
     return (
-        <Animated.View
-            style={{
-                opacity: fadeAnim,
-                transform: [{ scale: scaleAnim }],
-            }}
-        >
+        <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
             <TouchableOpacity
                 style={styles.container}
                 onPress={handlePress}
                 onPressIn={handlePressIn}
                 onPressOut={handlePressOut}
-                activeOpacity={1}
+                activeOpacity={0.95}
                 accessible={true}
                 accessibilityRole="button"
                 accessibilityLabel={accessibilityLabel}
@@ -87,75 +77,134 @@ export const QuestionCard = memo(function QuestionCard({
                         <OptimizedAvatar
                             imageUrl={question.user?.profilePictureUrl}
                             displayName={question.user?.displayName}
-                            size={36}
+                            size={34}
                             isAnonymous={question.isAnonymous}
                         />
-                        <View>
-                            <Text style={styles.authorName}>
-                                {question.isAnonymous ? 'Anonim Kullanıcı' : question.user?.displayName}
-                            </Text>
-                            {!question.isAnonymous && question.user?.reputation !== undefined && (
-                                <Text style={styles.reputation}>
-                                    {question.user.reputation} puan
+                        <View style={styles.authorMeta}>
+                            <View style={styles.authorTopLine}>
+                                <Text style={styles.authorName} numberOfLines={1}>
+                                    {question.isAnonymous
+                                        ? 'Anonim Üye'
+                                        : question.user?.displayName || 'Topluluk Üyesi'}
                                 </Text>
-                            )}
+                                <Text style={styles.dotSeparator}>•</Text>
+                                <Text style={styles.timestamp}>
+                                    {formatTimestamp(question.createdAt)}
+                                </Text>
+                            </View>
+                            {!question.isAnonymous &&
+                                question.user?.reputation !== undefined &&
+                                question.user.reputation > 0 && (
+                                    <Text style={styles.reputation}>
+                                        {question.user.reputation} itibar puanı
+                                    </Text>
+                                )}
                         </View>
                     </View>
+
                     {question.isPremium && (
-                        <View style={styles.premiumBadge}>
-                            <Text style={{ fontSize: 12 }}>⭐</Text>
-                            <Text style={styles.premiumText}>Premium</Text>
+                        <View style={styles.featuredBadge}>
+                            <Ionicons name="sparkles" size={11} color="#D97706" />
+                            <Text style={styles.featuredBadgeText}>Öne Çıkan</Text>
                         </View>
                     )}
                 </View>
 
-                {/* Title */}
+                {/* Title & Excerpt */}
                 <Text style={styles.title} numberOfLines={2}>
                     {question.title}
                 </Text>
-
-                {/* Content Preview */}
-                <Text style={styles.content} numberOfLines={3}>
+                <Text style={styles.content} numberOfLines={2}>
                     {question.content}
                 </Text>
 
-                {/* Category and Tags */}
+                {/* Category & Tags */}
                 <View style={styles.tagsContainer}>
-                    <CategoryPill category={question.category} />
-                    {question.tags.slice(0, 3).map((tag) => (
-                        <TagChip key={tag} tag={tag} />
+                    <CategoryPill category={question.category} size="small" />
+                    {question.tags.slice(0, 2).map((tag) => (
+                        <TagChip key={tag} tag={tag} size="small" />
                     ))}
-                    {question.tags.length > 3 && (
-                        <Text style={styles.moreTags}>+{question.tags.length - 3}</Text>
+                    {question.tags.length > 2 && (
+                        <Text style={styles.moreTags}>+{question.tags.length - 2}</Text>
                     )}
                 </View>
 
-                {/* Footer Stats */}
+                {/* Footer */}
                 {showActions && (
                     <View style={styles.footer}>
                         <View style={styles.stats}>
-                            <View style={[styles.stat, hasAcceptedAnswer && styles.statSuccess]}>
-                                <Text style={{ fontSize: 14 }}>
-                                    {hasAcceptedAnswer ? '✅' : '💬'}
-                                </Text>
-                                <Text style={[styles.statText, hasAcceptedAnswer && styles.statTextSuccess]}>
+                            <View
+                                style={[
+                                    styles.answerStatPill,
+                                    isAnswered && styles.answerStatPillSuccess,
+                                ]}
+                            >
+                                <Ionicons
+                                    name={
+                                        isAnswered
+                                            ? 'checkmark-circle'
+                                            : 'chatbubble-ellipses-outline'
+                                    }
+                                    size={13}
+                                    color={
+                                        isAnswered
+                                            ? theme.colors.success
+                                            : theme.colors.textSecondary
+                                    }
+                                />
+                                <Text
+                                    style={[
+                                        styles.statText,
+                                        isAnswered && styles.statTextSuccess,
+                                    ]}
+                                >
                                     {answerCount} cevap
                                 </Text>
                             </View>
+
                             <View style={styles.stat}>
-                                <Text style={{ fontSize: 14 }}>👁️</Text>
+                                <Ionicons
+                                    name="eye-outline"
+                                    size={14}
+                                    color={theme.colors.textLight}
+                                />
                                 <Text style={styles.statText}>{question.viewCount}</Text>
                             </View>
-                            {question._count?.favorites !== undefined && question._count.favorites > 0 && (
+
+                            {favoriteCount > 0 && (
                                 <View style={styles.stat}>
-                                    <Text style={{ fontSize: 14 }}>❤️</Text>
-                                    <Text style={styles.statText}>{question._count.favorites}</Text>
+                                    <Ionicons
+                                        name={question.isFavorited ? 'heart' : 'heart-outline'}
+                                        size={14}
+                                        color={
+                                            question.isFavorited
+                                                ? '#F43F5E'
+                                                : theme.colors.textLight
+                                        }
+                                    />
+                                    <Text style={styles.statText}>{favoriteCount}</Text>
                                 </View>
                             )}
                         </View>
-                        <Text style={styles.timestamp}>
-                            {formatTimestamp(question.createdAt)}
-                        </Text>
+
+                        <View style={styles.rightFooter}>
+                            {isClosed ? (
+                                <View style={styles.closedBadge}>
+                                    <Ionicons
+                                        name="lock-closed-outline"
+                                        size={11}
+                                        color={theme.colors.textLight}
+                                    />
+                                    <Text style={styles.closedText}>Kapalı</Text>
+                                </View>
+                            ) : (
+                                <Ionicons
+                                    name="chevron-forward"
+                                    size={16}
+                                    color={theme.colors.textLight}
+                                />
+                            )}
+                        </View>
                     </View>
                 )}
             </TouchableOpacity>
@@ -172,9 +221,9 @@ function formatTimestamp(timestamp: string): string {
     const diffDays = Math.floor(diffMs / 86400000);
 
     if (diffMins < 1) return 'Şimdi';
-    if (diffMins < 60) return `${diffMins} dk önce`;
-    if (diffHours < 24) return `${diffHours} saat önce`;
-    if (diffDays < 7) return `${diffDays} gün önce`;
+    if (diffMins < 60) return `${diffMins} dk`;
+    if (diffHours < 24) return `${diffHours} sa`;
+    if (diffDays < 7) return `${diffDays} gün`;
 
     return date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
 }
@@ -183,12 +232,14 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     StyleSheet.create({
         container: {
             backgroundColor: theme.colors.backgroundCard,
-            borderRadius: 16,
-            padding: theme.spacing.lg,
-            marginBottom: theme.spacing.md,
-            shadowColor: '#000',
+            borderRadius: 18,
+            padding: 16,
+            marginBottom: 12,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            shadowColor: theme.colors.shadow,
             shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.06,
+            shadowOpacity: 0.04,
             shadowRadius: 8,
             elevation: 2,
         },
@@ -196,96 +247,136 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
-            marginBottom: theme.spacing.md,
+            marginBottom: 10,
+            gap: 8,
         },
         authorInfo: {
             flexDirection: 'row',
             alignItems: 'center',
-            gap: theme.spacing.sm,
+            gap: 10,
             flex: 1,
         },
+        authorMeta: {
+            flex: 1,
+        },
+        authorTopLine: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 5,
+        },
         authorName: {
-            fontSize: 14,
-            fontWeight: '600',
+            fontSize: 13.5,
+            fontWeight: '700',
             color: theme.colors.text,
+            flexShrink: 1,
+        },
+        dotSeparator: {
+            fontSize: 12,
+            color: theme.colors.textLight,
+        },
+        timestamp: {
+            fontSize: 12,
+            color: theme.colors.textLight,
+            fontWeight: '500',
         },
         reputation: {
             fontSize: 11,
             color: theme.colors.textSecondary,
-            marginTop: 2,
+            marginTop: 1,
         },
-        premiumBadge: {
+        featuredBadge: {
             flexDirection: 'row',
             alignItems: 'center',
             gap: 4,
-            backgroundColor: 'rgba(255, 215, 0, 0.1)',
+            backgroundColor: 'rgba(245, 158, 11, 0.14)',
             paddingHorizontal: 8,
             paddingVertical: 4,
-            borderRadius: 12,
+            borderRadius: 10,
         },
-        premiumText: {
+        featuredBadgeText: {
             fontSize: 11,
-            fontWeight: '600',
-            color: '#FFD700',
+            fontWeight: '700',
+            color: '#D97706',
         },
         title: {
-            fontSize: 17,
+            fontSize: 16,
             fontWeight: '700',
             color: theme.colors.text,
-            marginBottom: theme.spacing.sm,
-            lineHeight: 24,
+            marginBottom: 6,
+            lineHeight: 22,
         },
         content: {
-            fontSize: 14,
+            fontSize: 13.5,
             color: theme.colors.textSecondary,
-            lineHeight: 20,
-            marginBottom: theme.spacing.md,
+            lineHeight: 19,
+            marginBottom: 12,
         },
         tagsContainer: {
             flexDirection: 'row',
             flexWrap: 'wrap',
-            gap: theme.spacing.xs,
-            marginBottom: theme.spacing.md,
+            alignItems: 'center',
+            gap: 6,
+            marginBottom: 12,
         },
         moreTags: {
-            fontSize: 12,
-            color: theme.colors.textSecondary,
-            alignSelf: 'center',
-            marginLeft: 4,
+            fontSize: 11.5,
+            color: theme.colors.textLight,
+            fontWeight: '600',
         },
         footer: {
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
-            paddingTop: theme.spacing.sm,
+            paddingTop: 10,
             borderTopWidth: 1,
             borderTopColor: theme.colors.border,
         },
         stats: {
             flexDirection: 'row',
-            gap: theme.spacing.md,
+            alignItems: 'center',
+            gap: 12,
+        },
+        answerStatPill: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 4,
+            paddingHorizontal: 8,
+            paddingVertical: 4,
+            borderRadius: 10,
+            backgroundColor: theme.colors.background,
+        },
+        answerStatPillSuccess: {
+            backgroundColor: 'rgba(16, 185, 129, 0.12)',
         },
         stat: {
             flexDirection: 'row',
             alignItems: 'center',
             gap: 4,
         },
-        statSuccess: {
-            backgroundColor: 'rgba(34, 197, 94, 0.1)',
-            paddingHorizontal: 8,
-            paddingVertical: 4,
-            borderRadius: 8,
-        },
         statText: {
-            fontSize: 13,
+            fontSize: 12.5,
             color: theme.colors.textSecondary,
-            fontWeight: '500',
+            fontWeight: '600',
         },
         statTextSuccess: {
             color: theme.colors.success,
         },
-        timestamp: {
-            fontSize: 12,
+        rightFooter: {
+            flexDirection: 'row',
+            alignItems: 'center',
+        },
+        closedBadge: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 3,
+            paddingHorizontal: 7,
+            paddingVertical: 3,
+            borderRadius: 8,
+            backgroundColor: theme.colors.background,
+        },
+        closedText: {
+            fontSize: 11,
             color: theme.colors.textLight,
+            fontWeight: '600',
         },
     });

@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { WellnessService, StepsData, MeditationData, SleepData } from './wellness.service';
+import { AdminGuard } from '../common/guards/admin.guard';
 
 @Controller('wellness/v1')
 @UseGuards(AuthGuard('jwt'))
@@ -138,27 +139,142 @@ export class WellnessController {
   // ────────────────────────────────────────────────────────────────────────
 
   @Get('admin/stats')
+  @UseGuards(AdminGuard)
   async getAdminStats() {
-    const [stepsStats, meditationStats, sleepStats, waterStats] = await Promise.all([
-      this.wellnessService['prisma'].dailySteps.aggregate({
-        _sum: { count: true },
+    const prisma = this.wellnessService['prisma'];
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [
+      dailyStepsStats,
+      legacyStepsStats,
+      meditationStats,
+      sleepStats,
+      waterStats,
+      totalDailyLogs,
+      totalHealthMetrics,
+      activeStepUsers,
+      activeWaterUsers,
+    ] = await Promise.all([
+      prisma.dailySteps.aggregate({ _sum: { count: true }, _count: true }),
+      prisma.stepsLog.aggregate({ _sum: { steps: true } }),
+      prisma.meditationSession.aggregate({ _sum: { durationMin: true }, _count: true }),
+      prisma.sleepLog.aggregate({ _sum: { durationMin: true }, _count: true }),
+      prisma.waterLog.aggregate({ _sum: { amountMl: true }, _count: true }),
+      prisma.dailyLog.count(),
+      prisma.healthMetric.count(),
+      prisma.dailySteps.findMany({
+        where: { date: { gte: sevenDaysAgo } },
+        select: { userId: true },
+        distinct: ['userId'],
       }),
-      this.wellnessService['prisma'].meditationSession.aggregate({
-        _sum: { durationMin: true },
+      prisma.waterLog.findMany({
+        where: { loggedAt: { gte: sevenDaysAgo } },
+        select: { userId: true },
+        distinct: ['userId'],
       }),
-      this.wellnessService['prisma'].sleepLog.aggregate({
-        _sum: { durationMin: true },
+    ]);
+
+    const activeUserIds = new Set([
+      ...activeStepUsers.map((u) => u.userId),
+      ...activeWaterUsers.map((u) => u.userId),
+    ]);
+
+    return {
+      totalSteps: (dailyStepsStats._sum.count || 0) + (legacyStepsStats._sum.steps || 0),
+      totalMeditation: meditationStats._sum.durationMin || 0,
+      totalSleep: Math.round(((sleepStats._sum.durationMin || 0) / 60) * 10) / 10,
+      totalWater: waterStats._sum.amountMl || 0,
+      totalDailyLogs,
+      totalHealthMetrics,
+      activeUsers7d: activeUserIds.size,
+      counts: {
+        steps: dailyStepsStats._count,
+        meditation: meditationStats._count,
+        sleep: sleepStats._count,
+        water: waterStats._count,
+        dailyLogs: totalDailyLogs,
+        metrics: totalHealthMetrics,
+      },
+    };
+  }
+
+  @Get('admin/overview')
+  @UseGuards(AdminGuard)
+  async getAdminOverview(
+    @Query('search') search?: string,
+    @Query('limit') limit: string = '50',
+  ) {
+    const prisma = this.wellnessService['prisma'];
+    const take = Math.min(100, Math.max(10, parseInt(limit, 10) || 50));
+    const userFilter = search?.trim()
+      ? {
+          user: {
+            OR: [
+              { email: { contains: search.trim(), mode: 'insensitive' as const } },
+              { username: { contains: search.trim(), mode: 'insensitive' as const } },
+            ],
+          },
+        }
+      : {};
+
+    const userSelect = {
+      select: {
+        id: true,
+        email: true,
+        username: true,
+      },
+    };
+
+    const [stats, steps, water, sleep, meditation, dailyLogs, metrics] = await Promise.all([
+      this.getAdminStats(),
+      prisma.dailySteps.findMany({
+        where: userFilter,
+        include: { user: userSelect },
+        orderBy: { date: 'desc' },
+        take,
       }),
-      this.wellnessService['prisma'].waterLog.aggregate({
-        _sum: { amountMl: true },
+      prisma.waterLog.findMany({
+        where: userFilter,
+        include: { user: userSelect },
+        orderBy: { loggedAt: 'desc' },
+        take,
+      }),
+      prisma.sleepLog.findMany({
+        where: userFilter,
+        include: { user: userSelect },
+        orderBy: { sleepDate: 'desc' },
+        take,
+      }),
+      prisma.meditationSession.findMany({
+        where: userFilter,
+        include: { user: userSelect },
+        orderBy: { date: 'desc' },
+        take,
+      }),
+      prisma.dailyLog.findMany({
+        where: userFilter,
+        include: { user: userSelect },
+        orderBy: { date: 'desc' },
+        take,
+      }),
+      prisma.healthMetric.findMany({
+        where: userFilter,
+        include: { user: userSelect },
+        orderBy: { measuredAt: 'desc' },
+        take,
       }),
     ]);
 
     return {
-      totalSteps: stepsStats._sum.count || 0,
-      totalMeditation: meditationStats._sum.durationMin || 0,
-      totalSleep: Math.round((sleepStats._sum.durationMin || 0) / 60),
-      totalWater: waterStats._sum.amountMl || 0,
+      stats,
+      records: {
+        steps,
+        water,
+        sleep,
+        meditation,
+        dailyLogs,
+        metrics,
+      },
     };
   }
 }

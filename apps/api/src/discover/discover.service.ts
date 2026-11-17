@@ -131,7 +131,7 @@ export class DiscoverService {
 
     // Get articles with filters
     async getArticles(
-        userId: string,
+        userId: string | null,
         filters: ArticleFilters,
         locale: string,
         pagination: Pagination,
@@ -141,24 +141,31 @@ export class DiscoverService {
             const skip = (page - 1) * limit;
 
             // Build where clause
+            const andConditions: any[] = [
+                {
+                    OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }],
+                },
+            ];
+
+            if (filters.search) {
+                const searchTerm = filters.search.trim();
+                andConditions.push({
+                    OR: [
+                        { titleTr: { contains: searchTerm, mode: 'insensitive' } },
+                        { titleEn: { contains: searchTerm, mode: 'insensitive' } },
+                        { excerpt: { contains: searchTerm, mode: 'insensitive' } },
+                        { tags: { hasSome: [searchTerm.toLowerCase()] } },
+                    ],
+                });
+            }
+
             const where: any = {
                 isActive: true,
-                OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }],
+                AND: andConditions,
             };
 
             if (filters.category) {
                 where.category = filters.category;
-            }
-
-            if (filters.search) {
-                // Use full-text search for better performance
-                // Falls back to LIKE search if full-text doesn't match
-                const searchTerm = filters.search.toLowerCase();
-                where.OR = [
-                    { titleTr: { contains: searchTerm, mode: 'insensitive' } },
-                    { titleEn: { contains: searchTerm, mode: 'insensitive' } },
-                    { tags: { hasSome: [searchTerm] } },
-                ];
             }
 
             // Get total count
@@ -188,13 +195,15 @@ export class DiscoverService {
                 take: limit,
             });
 
-            // Get interaction status
-            const interactions = await this.prisma.articleInteraction.findMany({
-                where: {
-                    userId,
-                    articleId: { in: articles.map((a) => a.id) },
-                },
-            });
+            // Get interaction status (only when authenticated)
+            const interactions = userId
+                ? await this.prisma.articleInteraction.findMany({
+                    where: {
+                        userId,
+                        articleId: { in: articles.map((a) => a.id) },
+                    },
+                })
+                : [];
 
             const interactionMap = new Map(
                 interactions.map((i) => [i.articleId, i]),
@@ -218,7 +227,7 @@ export class DiscoverService {
 
     // Get article detail
     async getArticle(
-        userId: string,
+        userId: string | null,
         articleId: string,
         locale: string,
     ): Promise<ArticleDetailDto> {
@@ -228,19 +237,21 @@ export class DiscoverService {
                 where: { id: articleId },
             });
 
-            if (!article) {
+            if (!article || (!userId && !article.isActive)) {
                 throw new NotFoundException('Article not found');
             }
 
             // 2. Get interaction status
-            const interaction = await this.prisma.articleInteraction.findUnique({
-                where: {
-                    userId_articleId: {
-                        userId,
-                        articleId,
+            const interaction = userId
+                ? await this.prisma.articleInteraction.findUnique({
+                    where: {
+                        userId_articleId: {
+                            userId,
+                            articleId,
+                        },
                     },
-                },
-            });
+                })
+                : null;
 
             // 3. Get related articles (same category, different article)
             const relatedArticles = await this.prisma.educationalArticle.findMany({
@@ -254,12 +265,14 @@ export class DiscoverService {
                 take: 3,
             });
 
-            const relatedInteractions = await this.prisma.articleInteraction.findMany({
-                where: {
-                    userId,
-                    articleId: { in: relatedArticles.map((a) => a.id) },
-                },
-            });
+            const relatedInteractions = userId
+                ? await this.prisma.articleInteraction.findMany({
+                    where: {
+                        userId,
+                        articleId: { in: relatedArticles.map((a) => a.id) },
+                    },
+                })
+                : [];
 
             const relatedInteractionMap = new Map(
                 relatedInteractions.map((i) => [i.articleId, i]),

@@ -1,24 +1,154 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+export interface NovaLimitsConfig {
+  freeMonthlyLimit: number;
+  premiumMonthlyLimit: number;
+  maxMessageLength: number;
+  isNovaEnabled: boolean;
+  maintenanceMessage: string;
+  systemGreeting: string;
+}
+
+const DEFAULT_NOVA_LIMITS: NovaLimitsConfig = {
+  freeMonthlyLimit: 100,
+  premiumMonthlyLimit: 1000,
+  maxMessageLength: 500,
+  isNovaEnabled: true,
+  maintenanceMessage: 'NOVA şu anda bakımdadır. Kısa süre sonra tekrar deneyebilirsiniz.',
+  systemGreeting:
+    'Merhaba! Ben NOVA, kişisel kadın sağlığı asistanınım. Döngün, hamilelik sürecin, su tüketimin veya genel sağlığınla ilgili sorularını buradan yanıtlayabilirim.',
+};
+
+const NOVA_CONFIG_KEY = 'nova_limits_config';
+
 @Injectable()
 export class QuotaService {
   constructor(private readonly prisma: PrismaService) { }
 
-  /**
-   * Get current month key (YYYY-MM format)
-   */
   private getCurrentMonthKey(): string {
     return new Date().toISOString().slice(0, 7);
   }
 
-  /**
-   * Get or create quota record for user in current month
-   */
+  private getNextMonthStart(): Date {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  }
+
+  async getLimitsConfig(): Promise<NovaLimitsConfig> {
+    const flag = await this.prisma.featureFlag.findUnique({
+      where: { key: NOVA_CONFIG_KEY },
+    });
+
+    const val = (flag?.valueJson as Record<string, any>) || {};
+    return {
+      freeMonthlyLimit:
+        typeof val.freeMonthlyLimit === 'number' && val.freeMonthlyLimit > 0
+          ? val.freeMonthlyLimit
+          : DEFAULT_NOVA_LIMITS.freeMonthlyLimit,
+      premiumMonthlyLimit:
+        typeof val.premiumMonthlyLimit === 'number' && val.premiumMonthlyLimit > 0
+          ? val.premiumMonthlyLimit
+          : DEFAULT_NOVA_LIMITS.premiumMonthlyLimit,
+      maxMessageLength:
+        typeof val.maxMessageLength === 'number' && val.maxMessageLength >= 50
+          ? val.maxMessageLength
+          : DEFAULT_NOVA_LIMITS.maxMessageLength,
+      isNovaEnabled:
+        typeof val.isNovaEnabled === 'boolean'
+          ? val.isNovaEnabled
+          : DEFAULT_NOVA_LIMITS.isNovaEnabled,
+      maintenanceMessage:
+        typeof val.maintenanceMessage === 'string' && val.maintenanceMessage.trim()
+          ? val.maintenanceMessage
+          : DEFAULT_NOVA_LIMITS.maintenanceMessage,
+      systemGreeting:
+        typeof val.systemGreeting === 'string' && val.systemGreeting.trim()
+          ? val.systemGreeting
+          : DEFAULT_NOVA_LIMITS.systemGreeting,
+    };
+  }
+
+  async updateLimitsConfig(
+    input: Partial<NovaLimitsConfig> & { syncExisting?: boolean },
+  ): Promise<NovaLimitsConfig> {
+    const current = await this.getLimitsConfig();
+    const next: NovaLimitsConfig = {
+      freeMonthlyLimit:
+        typeof input.freeMonthlyLimit === 'number' && input.freeMonthlyLimit > 0
+          ? Math.round(input.freeMonthlyLimit)
+          : current.freeMonthlyLimit,
+      premiumMonthlyLimit:
+        typeof input.premiumMonthlyLimit === 'number' && input.premiumMonthlyLimit > 0
+          ? Math.round(input.premiumMonthlyLimit)
+          : current.premiumMonthlyLimit,
+      maxMessageLength:
+        typeof input.maxMessageLength === 'number' && input.maxMessageLength >= 50
+          ? Math.round(input.maxMessageLength)
+          : current.maxMessageLength,
+      isNovaEnabled:
+        typeof input.isNovaEnabled === 'boolean'
+          ? input.isNovaEnabled
+          : current.isNovaEnabled,
+      maintenanceMessage:
+        typeof input.maintenanceMessage === 'string' && input.maintenanceMessage.trim()
+          ? input.maintenanceMessage.trim()
+          : current.maintenanceMessage,
+      systemGreeting:
+        typeof input.systemGreeting === 'string' && input.systemGreeting.trim()
+          ? input.systemGreeting.trim()
+          : current.systemGreeting,
+    };
+
+    await this.prisma.featureFlag.upsert({
+      where: { key: NOVA_CONFIG_KEY },
+      update: { valueJson: next as any },
+      create: { key: NOVA_CONFIG_KEY, valueJson: next as any },
+    });
+
+    if (input.syncExisting !== false) {
+      await this.syncActiveLimits(next);
+    }
+
+    return next;
+  }
+
+  private async syncActiveLimits(config: NovaLimitsConfig) {
+    const monthKey = this.getCurrentMonthKey();
+
+    // Update Subscription limits for FREE and ACTIVE/TRIAL plans
+    await this.prisma.subscription.updateMany({
+      where: { status: { in: ['ACTIVE', 'TRIAL'] } },
+      data: { aiMessagesLimit: config.premiumMonthlyLimit },
+    });
+    await this.prisma.subscription.updateMany({
+      where: { status: { notIn: ['ACTIVE', 'TRIAL'] } },
+      data: { aiMessagesLimit: config.freeMonthlyLimit },
+    });
+
+    // Sync UsageQuota records for current month
+    const quotas = await this.prisma.usageQuota.findMany({
+      where: { monthKey },
+      include: { user: { include: { subscription: true } } },
+    });
+
+    for (const q of quotas) {
+      const isPrem =
+        q.user?.subscription?.status === 'ACTIVE' ||
+        q.user?.subscription?.status === 'TRIAL';
+      const targetLimit = isPrem ? config.premiumMonthlyLimit : config.freeMonthlyLimit;
+      if (q.limit !== targetLimit) {
+        await this.prisma.usageQuota.update({
+          where: { id: q.id },
+          data: { limit: targetLimit },
+        });
+      }
+    }
+  }
+
   async getOrCreateQuota(userId: string) {
     const monthKey = this.getCurrentMonthKey();
 
-    // Try to find existing quota
     let quota = await this.prisma.usageQuota.findUnique({
       where: {
         userId_monthKey: {
@@ -28,16 +158,18 @@ export class QuotaService {
       },
     });
 
-    // If not found, create it
     if (!quota) {
-      // Get user's subscription to determine limit
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-        include: { subscription: true },
-      });
+      const [user, config] = await Promise.all([
+        this.prisma.user.findUnique({
+          where: { id: userId },
+          include: { subscription: true },
+        }),
+        this.getLimitsConfig(),
+      ]);
 
-      const isPremium = user?.subscription?.status === 'ACTIVE' || user?.subscription?.status === 'TRIAL';
-      const limit = isPremium ? 1000 : 100;
+      const isPremium =
+        user?.subscription?.status === 'ACTIVE' || user?.subscription?.status === 'TRIAL';
+      const limit = isPremium ? config.premiumMonthlyLimit : config.freeMonthlyLimit;
 
       quota = await this.prisma.usageQuota.create({
         data: {
@@ -53,25 +185,11 @@ export class QuotaService {
     return quota;
   }
 
-  /**
-   * Get next month start date
-   */
-  private getNextMonthStart(): Date {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  }
-
-  /**
-   * Check if user has quota available
-   */
   async hasQuota(userId: string): Promise<boolean> {
     const quota = await this.getOrCreateQuota(userId);
     return quota.aiRequests < quota.limit;
   }
 
-  /**
-   * Check quota and throw if exceeded
-   */
   async checkQuota(userId: string) {
     const hasQuota = await this.hasQuota(userId);
     if (!hasQuota) {
@@ -83,19 +201,11 @@ export class QuotaService {
     }
   }
 
-  /**
-   * Increment AI request counter
-   */
   async increment(userId: string) {
-    const monthKey = this.getCurrentMonthKey();
+    const quota = await this.getOrCreateQuota(userId);
 
     await this.prisma.usageQuota.update({
-      where: {
-        userId_monthKey: {
-          userId,
-          monthKey,
-        },
-      },
+      where: { id: quota.id },
       data: {
         aiRequests: {
           increment: 1,
@@ -104,48 +214,49 @@ export class QuotaService {
     });
   }
 
-  /**
-   * Get current quota status for user
-   */
   async getStatus(userId: string) {
-    const quota = await this.getOrCreateQuota(userId);
+    const [quota, config] = await Promise.all([
+      this.getOrCreateQuota(userId),
+      this.getLimitsConfig(),
+    ]);
 
     return {
       used: quota.aiRequests,
       limit: quota.limit,
       remaining: Math.max(0, quota.limit - quota.aiRequests),
       resetsAt: quota.resetsAt,
+      resetDate: quota.resetsAt,
       monthKey: quota.monthKey,
-      percentage: Math.round((quota.aiRequests / quota.limit) * 100),
+      percentage: quota.limit > 0 ? Math.round((quota.aiRequests / quota.limit) * 100) : 100,
+      hasQuota: quota.aiRequests < quota.limit,
+      maxMessageLength: config.maxMessageLength,
+      isNovaEnabled: config.isNovaEnabled,
+      maintenanceMessage: config.maintenanceMessage,
+      systemGreeting: config.systemGreeting,
     };
   }
 
-  /**
-   * Reset quota for a user (admin function)
-   */
   async reset(userId: string) {
-    const monthKey = this.getCurrentMonthKey();
+    const quota = await this.getOrCreateQuota(userId);
+
+    await this.prisma.subscription
+      .updateMany({
+        where: { userId },
+        data: { aiMessagesUsed: 0 },
+      })
+      .catch(() => {});
 
     return this.prisma.usageQuota.update({
-      where: {
-        userId_monthKey: {
-          userId,
-          monthKey,
-        },
-      },
+      where: { id: quota.id },
       data: {
         aiRequests: 0,
       },
     });
   }
 
-  /**
-   * Reset all quotas for new month (scheduled job)
-   */
   async resetAll() {
     const currentMonthKey = this.getCurrentMonthKey();
 
-    // Delete old quota records (keep only current month)
     await this.prisma.usageQuota.deleteMany({
       where: {
         monthKey: {
@@ -157,47 +268,60 @@ export class QuotaService {
     return { status: 'ok', message: 'All quotas reset for new month' };
   }
 
-  /**
-   * Update user's quota limit (when plan changes)
-   */
   async updateLimit(userId: string, newLimit: number) {
-    const monthKey = this.getCurrentMonthKey();
+    const quota = await this.getOrCreateQuota(userId);
+
+    await this.prisma.subscription
+      .updateMany({
+        where: { userId },
+        data: { aiMessagesLimit: newLimit },
+      })
+      .catch(() => {});
 
     return this.prisma.usageQuota.update({
-      where: {
-        userId_monthKey: {
-          userId,
-          monthKey,
-        },
-      },
+      where: { id: quota.id },
       data: {
         limit: newLimit,
       },
     });
   }
 
-  /**
-   * List all quotas (admin function)
-   */
-  async findAll(params?: { page?: number; limit?: number }) {
-    const { page = 1, limit = 50 } = params || {};
+  async findAll(params?: { page?: number; limit?: number; search?: string }) {
+    const { page = 1, limit = 50, search } = params || {};
     const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (search?.trim()) {
+      where.user = {
+        OR: [
+          { email: { contains: search.trim(), mode: 'insensitive' } },
+          { username: { contains: search.trim(), mode: 'insensitive' } },
+        ],
+      };
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.usageQuota.findMany({
+        where,
         skip,
         take: limit,
-        orderBy: { resetsAt: 'desc' },
+        orderBy: [{ aiRequests: 'desc' }, { resetsAt: 'desc' }],
         include: {
           user: {
             select: {
               id: true,
               email: true,
+              username: true,
+              subscription: {
+                select: {
+                  status: true,
+                },
+              },
             },
           },
         },
       }),
-      this.prisma.usageQuota.count(),
+      this.prisma.usageQuota.count({ where }),
     ]);
 
     return {
@@ -205,6 +329,32 @@ export class QuotaService {
       total,
       page,
       limit,
+    };
+  }
+
+  async getAdminSummary() {
+    const monthKey = this.getCurrentMonthKey();
+    const [config, quotas, totalMessagesAgg, exhaustedCount] = await Promise.all([
+      this.getLimitsConfig(),
+      this.prisma.usageQuota.count({ where: { monthKey } }),
+      this.prisma.usageQuota.aggregate({
+        where: { monthKey },
+        _sum: { aiRequests: true },
+      }),
+      this.prisma.usageQuota.findMany({
+        where: { monthKey },
+        select: { aiRequests: true, limit: true },
+      }),
+    ]);
+
+    const exhaustedUsers = exhaustedCount.filter((q) => q.aiRequests >= q.limit).length;
+
+    return {
+      config,
+      monthKey,
+      activeQuotaUsers: quotas,
+      totalMessagesThisMonth: totalMessagesAgg._sum.aiRequests || 0,
+      exhaustedUsers,
     };
   }
 }

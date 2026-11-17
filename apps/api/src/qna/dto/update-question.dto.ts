@@ -1,5 +1,5 @@
-import { IsString, IsEnum, IsArray, IsOptional, MaxLength, MinLength, ArrayMaxSize } from 'class-validator';
-import { QuestionCategory } from '@prisma/client';
+import { IsString, IsEnum, IsArray, IsOptional, IsBoolean, MaxLength, MinLength, ArrayMaxSize } from 'class-validator';
+import { QuestionCategory, QuestionStatus } from '@prisma/client';
 
 export class UpdateQuestionDto {
     @IsString()
@@ -23,4 +23,18 @@ export class UpdateQuestionDto {
     @ArrayMaxSize(5, { message: 'En fazla 5 etiket ekleyebilirsiniz' })
     @IsOptional()
     tags?: string[];
+}
+
+export class AdminUpdateQuestionDto extends UpdateQuestionDto {
+    @IsEnum(QuestionStatus, { message: 'Geçersiz durum' })
+    @IsOptional()
+    status?: QuestionStatus;
+
+    @IsBoolean()
+    @IsOptional()
+    isAnonymous?: boolean;
+
+    @IsBoolean()
+    @IsOptional()
+    isPremium?: boolean;
 }

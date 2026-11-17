@@ -4,18 +4,23 @@ import {
     Post,
     Body,
     Param,
+    Put,
     Query,
     UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UserStatus, SubscriptionStatus } from '@prisma/client';
+import { IsArray, IsObject, IsOptional, IsString } from 'class-validator';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { AdminService } from './admin.service';
+import { RetentionService, WinbackConfig } from './retention.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 class BulkUpdateDto {
+    @IsArray()
     userIds!: string[];
+    @IsObject()
     data!: {
         status?: UserStatus;
         pinEnabled?: boolean;
@@ -23,27 +28,55 @@ class BulkUpdateDto {
 }
 
 class BulkDeleteDto {
+    @IsArray()
     userIds!: string[];
 }
 
 class BulkNotificationDto {
+    @IsArray()
     userIds!: string[];
+    @IsObject()
     notification!: {
         title: string;
         body: string;
     };
 }
 
+class BulkEmailDto {
+    @IsArray()
+    userIds!: string[];
+    @IsObject()
+    email!: {
+        subject: string;
+        body: string;
+    };
+}
+
 class SearchUsersDto {
+    @IsOptional()
+    @IsString()
     search?: string;
+    @IsOptional()
     status?: UserStatus;
+    @IsOptional()
     subscriptionStatus?: SubscriptionStatus;
+    @IsOptional()
+    @IsString()
     createdAfter?: string;
+    @IsOptional()
+    @IsString()
     createdBefore?: string;
-    hasSubscription?: boolean;
-    page?: number;
-    limit?: number;
+    @IsOptional()
+    hasSubscription?: boolean | string;
+    @IsOptional()
+    page?: number | string;
+    @IsOptional()
+    limit?: number | string;
+    @IsOptional()
+    @IsString()
     sortBy?: string;
+    @IsOptional()
+    @IsString()
     sortOrder?: 'asc' | 'desc';
 }
 
@@ -52,7 +85,10 @@ class SearchUsersDto {
 @UseGuards(AuthGuard('jwt'), AdminGuard)
 @ApiBearerAuth()
 export class AdminController {
-    constructor(private readonly adminService: AdminService) { }
+    constructor(
+        private readonly adminService: AdminService,
+        private readonly retentionService: RetentionService,
+    ) { }
 
     /**
      * Dashboard Statistics
@@ -109,6 +145,12 @@ export class AdminController {
         );
     }
 
+    @Post('bulk/send-emails')
+    @ApiOperation({ summary: 'Bulk send emails' })
+    async bulkSendEmails(@Body() dto: BulkEmailDto) {
+        return this.adminService.bulkSendEmails(dto.userIds, dto.email);
+    }
+
     /**
      * Advanced User Search & Filtering
      */
@@ -119,7 +161,10 @@ export class AdminController {
             ...filters,
             createdAfter: filters.createdAfter ? new Date(filters.createdAfter) : undefined,
             createdBefore: filters.createdBefore ? new Date(filters.createdBefore) : undefined,
-            hasSubscription: filters.hasSubscription === true || filters.hasSubscription === 'true' as any,
+            hasSubscription:
+                filters.hasSubscription === undefined || filters.hasSubscription === ''
+                    ? undefined
+                    : filters.hasSubscription === true || filters.hasSubscription === 'true',
             page: filters.page ? parseInt(filters.page.toString(), 10) : 1,
             limit: filters.limit ? parseInt(filters.limit.toString(), 10) : 20,
         };
@@ -145,5 +190,70 @@ export class AdminController {
     @ApiOperation({ summary: 'Get system health metrics' })
     async getSystemHealth() {
         return this.adminService.getSystemHealth();
+    }
+
+    @Get('users/:userId/overview')
+    @ApiOperation({ summary: 'Get 360 user overview (Admin)' })
+    async getUserOverview(@Param('userId') userId: string) {
+        return this.adminService.getUserOverview360(userId);
+    }
+
+    @Post('users/:userId/send-push')
+    @ApiOperation({ summary: 'Send direct push notification to user (Admin)' })
+    async sendDirectPush(
+        @Param('userId') userId: string,
+        @Body() body: { title: string; body: string },
+    ) {
+        return this.adminService.sendDirectPushToUser(userId, body.title, body.body);
+    }
+
+    @Get('retention/funnel')
+    @ApiOperation({ summary: 'Get user retention & conversion funnel' })
+    async getRetentionFunnel() {
+        return this.retentionService.getFunnelStats();
+    }
+
+    @Get('retention/winback')
+    @ApiOperation({ summary: 'Get automated win-back configuration and logs' })
+    async getWinbackConfig() {
+        const [config, logs] = await Promise.all([
+            this.retentionService.getWinbackConfig(),
+            this.retentionService.getWinbackLogs(),
+        ]);
+        return { config, logs };
+    }
+
+    @Put('retention/winback')
+    @ApiOperation({ summary: 'Update automated win-back configuration' })
+    async updateWinbackConfig(@Body() body: Partial<WinbackConfig>) {
+        const config = await this.retentionService.updateWinbackConfig(body);
+        const logs = await this.retentionService.getWinbackLogs();
+        return { config, logs };
+    }
+
+    @Post('retention/winback/dispatch')
+    @ApiOperation({ summary: 'Run win-back campaign dispatch immediately' })
+    async dispatchWinbackNow() {
+        const summary = await this.retentionService.dispatchWinbackCampaigns(true);
+        const logs = await this.retentionService.getWinbackLogs();
+        return { summary, logs };
+    }
+
+    @Post('retention/nudge-user/:userId')
+    @ApiOperation({ summary: 'Send targeted retention nudge to a specific user' })
+    async nudgeUser(
+        @Param('userId') userId: string,
+        @Body()
+        body: {
+            titleTr?: string;
+            bodyTr?: string;
+            incentive?: 'none' | 'trial_offer' | 'nova_bonus' | 'quick_checkin';
+            ctaScreen?: 'home' | 'calendar' | 'chat' | 'premium';
+            sendPush?: boolean;
+            sendEmail?: boolean;
+            showInAppBanner?: boolean;
+        },
+    ) {
+        return this.retentionService.nudgeSpecificUser(userId, body);
     }
 }

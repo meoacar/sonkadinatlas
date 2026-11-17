@@ -10,8 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '@/hooks/useTheme';
-
-const API_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+import { API_BASE_URL as API_URL } from '@/utils/apiBaseUrl';
 
 interface Page {
     id: string;

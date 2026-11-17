@@ -27,6 +27,7 @@ import {
     useCreateAnswerComment,
     useMarkBestAnswer,
     useVoteAnswer,
+    useRemoveVote,
     useFavoriteQuestion,
     useUnfavoriteQuestion,
     useFollowQuestion,
@@ -84,31 +85,33 @@ export default function QuestionDetailScreen() {
         enabled: hasValidId,
     });
 
-    // Load comments for all answers (only once when answers change)
-    useEffect(() => {
-        const loadAnswerComments = async () => {
-            if (answers.length > 0) {
-                const answerIds = answers.map(a => a.id).sort().join(',');
-                const currentIds = Object.keys(answerCommentsMap).sort().join(',');
-
-                // Only load if answer IDs changed
-                if (answerIds !== currentIds) {
-                    const commentsMap: Record<string, any[]> = {};
-                    for (const answer of answers) {
-                        try {
-                            const comments = await qnaService.getAnswerComments(answer.id);
-                            commentsMap[answer.id] = comments;
-                        } catch (error) {
-                            console.error(`Failed to load comments for answer ${answer.id}:`, error);
-                            commentsMap[answer.id] = [];
-                        }
-                    }
-                    setAnswerCommentsMap(commentsMap);
+    const fetchAllAnswerComments = useCallback(async (targetAnswers: typeof answers) => {
+        if (targetAnswers.length === 0) return;
+        const commentsMap: Record<string, any[]> = {};
+        await Promise.all(
+            targetAnswers.map(async (answer) => {
+                try {
+                    const list = await qnaService.getAnswerComments(answer.id);
+                    commentsMap[answer.id] = list;
+                } catch (error) {
+                    console.error(`Failed to load comments for answer ${answer.id}:`, error);
+                    commentsMap[answer.id] = [];
                 }
+            })
+        );
+        setAnswerCommentsMap(commentsMap);
+    }, []);
+
+    // Load comments for all answers when answers change
+    useEffect(() => {
+        if (answers.length > 0) {
+            const answerIds = answers.map(a => a.id).sort().join(',');
+            const currentIds = Object.keys(answerCommentsMap).sort().join(',');
+            if (answerIds !== currentIds) {
+                fetchAllAnswerComments(answers);
             }
-        };
-        loadAnswerComments();
-    }, [answers.length]);
+        }
+    }, [answers, answerCommentsMap, fetchAllAnswerComments]);
     const { data: comments = [], isLoading: commentsLoading, refetch: refetchComments } = useQuestionComments(questionId, {
         enabled: hasValidId,
     });
@@ -119,6 +122,7 @@ export default function QuestionDetailScreen() {
     const createAnswerComment = useCreateAnswerComment();
     const markBestAnswer = useMarkBestAnswer();
     const voteAnswer = useVoteAnswer();
+    const removeVote = useRemoveVote();
     const favoriteQuestion = useFavoriteQuestion();
     const unfavoriteQuestion = useUnfavoriteQuestion();
     const followQuestion = useFollowQuestion();
@@ -152,9 +156,16 @@ export default function QuestionDetailScreen() {
     // Handlers
     const handleRefresh = useCallback(async () => {
         setRefreshing(true);
-        await Promise.all([refetchQuestion(), refetchAnswers(), refetchComments()]);
+        const [, answersResult] = await Promise.all([
+            refetchQuestion(),
+            refetchAnswers(),
+            refetchComments(),
+        ]);
+        if (answersResult?.data) {
+            await fetchAllAnswerComments(answersResult.data);
+        }
         setRefreshing(false);
-    }, [refetchQuestion, refetchAnswers, refetchComments]);
+    }, [refetchQuestion, refetchAnswers, refetchComments, fetchAllAnswerComments]);
 
     const handleSubmitAnswer = async (content: string) => {
         // Check if user can answer
@@ -270,8 +281,12 @@ export default function QuestionDetailScreen() {
                 return;
             }
 
-            // Vote or change vote
-            await voteAnswer.mutateAsync({ answerId, data: { voteType } });
+            // Toggle off if tapping the currently active vote, otherwise vote / switch
+            if (answer.userVote === voteType) {
+                await removeVote.mutateAsync(answerId);
+            } else {
+                await voteAnswer.mutateAsync({ answerId, data: { voteType } });
+            }
         } catch (error: any) {
             // Handle specific error messages
             const errorMessage = error.message || 'Oy verilemedi';
@@ -443,6 +458,7 @@ export default function QuestionDetailScreen() {
                 <ScrollView
                     style={styles.scrollView}
                     contentContainerStyle={styles.scrollContent}
+                    keyboardShouldPersistTaps="handled"
                     refreshControl={
                         <RefreshControl
                             refreshing={refreshing}
@@ -536,13 +552,28 @@ export default function QuestionDetailScreen() {
                             <TouchableOpacity
                                 style={styles.commentsHeader}
                                 onPress={() => setShowComments(!showComments)}
+                                activeOpacity={0.75}
                             >
-                                <Text style={styles.commentsTitle}>
-                                    Yorumlar ({comments.length})
-                                </Text>
-                                <Text style={{ fontSize: 20 }}>
-                                    {showComments ? '⬆️' : '⬇️'}
-                                </Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                    <Ionicons
+                                        name={showComments ? 'chatbubbles' : 'chatbubbles-outline'}
+                                        size={18}
+                                        color={theme.colors.primary}
+                                    />
+                                    <Text style={styles.commentsTitle}>
+                                        Yorumlar ({comments.length})
+                                    </Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '600', color: theme.colors.primary }}>
+                                        {showComments ? 'Gizle' : 'Yorum yap'}
+                                    </Text>
+                                    <Ionicons
+                                        name={showComments ? 'chevron-up' : 'chevron-down'}
+                                        size={18}
+                                        color={theme.colors.primary}
+                                    />
+                                </View>
                             </TouchableOpacity>
 
                             {showComments && (
@@ -712,7 +743,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
             flex: 1,
         },
         scrollContent: {
-            paddingBottom: theme.spacing.xl,
+            paddingBottom: 120,
         },
         headerButton: {
             padding: theme.spacing.sm,

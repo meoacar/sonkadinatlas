@@ -17,11 +17,9 @@ export default function WaterCalculatorScreen() {
   const calculateWaterMutation = useMutation({
     mutationFn: (data: { weightKg: number; activity?: string; climate?: string }) =>
       metricsService.calculateWater(data),
-    onSuccess: (data) => {
-      console.log('Water API Response:', JSON.stringify(data, null, 2));
-
+    onSuccess: (data: any) => {
       // If backend returns null, calculate on frontend as fallback
-      let dailyWaterMl = data.dailyWaterMl || data.dailyNeedMl;
+      let dailyWaterMl = data?.dailyWaterMl || data?.dailyNeedMl;
 
       if (!dailyWaterMl) {
         console.log('Backend returned null, calculating on frontend');

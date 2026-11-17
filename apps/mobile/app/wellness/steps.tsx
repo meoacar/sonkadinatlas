@@ -58,14 +58,14 @@ export default function StepsScreen() {
     };
   }, []);
 
-  const { data: stepsData, isLoading, refetch, error: stepsError } = useQuery({
+  const { data: stepsData, isLoading, refetch, error: stepsError } = useQuery<any[]>({
     queryKey: ['steps', dateRange.fromDateStr, dateRange.toDateStr],
     queryFn: () => wellnessService.getSteps(dateRange.fromISO, dateRange.toISO),
     enabled: isAuthenticated,
     retry: false,
   });
 
-  const { data: preferences, error: prefsError } = useQuery({
+  const { data: preferences, error: prefsError } = useQuery<any>({
     queryKey: ['wellnessPreferences'],
     queryFn: () => wellnessService.getPreferences(),
     enabled: isAuthenticated,

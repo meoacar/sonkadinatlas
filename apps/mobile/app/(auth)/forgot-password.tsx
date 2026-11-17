@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { authService } from '@/services/api';
 
@@ -20,25 +22,26 @@ export default function ForgotPasswordScreen() {
   const router = useRouter();
   const theme = useTheme();
   const [email, setEmail] = useState('');
+  const [focused, setFocused] = useState(false);
   const [loading, setLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
 
   const handleForgotPassword = async () => {
-    if (!email) {
-      Alert.alert('Hata', 'Lütfen e-posta adresinizi girin');
+    const trimmed = email.trim();
+    if (!trimmed) {
+      Alert.alert('Eksik Bilgi', 'Lütfen e-posta adresini gir.');
       return;
     }
 
-    // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      Alert.alert('Hata', 'Lütfen geçerli bir e-posta adresi girin');
+    if (!emailRegex.test(trimmed)) {
+      Alert.alert('Geçersiz E-posta', 'Lütfen geçerli bir e-posta adresi gir.');
       return;
     }
 
     setLoading(true);
     try {
-      await authService.forgotPassword({ email });
+      await authService.forgotPassword({ email: trimmed });
       setEmailSent(true);
     } catch (error: any) {
       Alert.alert('Hata', error.message || 'Bir hata oluştu');
@@ -48,48 +51,10 @@ export default function ForgotPasswordScreen() {
   };
 
   const styles = createStyles(theme);
-
-  if (emailSent) {
-    return (
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <View style={styles.container}>
-          <View style={styles.successContainer}>
-            <Text style={styles.successEmoji}>✉️</Text>
-            <Text style={styles.successTitle}>E-posta Gönderildi!</Text>
-            <Text style={styles.successMessage}>
-              Eğer {email} adresine kayıtlı bir hesap varsa, şifre sıfırlama bağlantısını içeren bir e-posta gönderilecektir.
-            </Text>
-            <Text style={styles.successHint}>
-              E-postayı göremiyorsanız spam klasörünüzü kontrol edin.
-            </Text>
-
-            <TouchableOpacity
-              style={styles.button}
-              onPress={() => router.back()}
-            >
-              <Text style={styles.buttonText}>Giriş Sayfasına Dön</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => {
-                setEmailSent(false);
-                setEmail('');
-              }}
-              style={styles.linkContainer}
-            >
-              <Text style={styles.linkText}>
-                E-postayı almadınız mı?{' '}
-                <Text style={styles.linkTextBold}>Tekrar gönder</Text>
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const canSubmit = Boolean(email.trim()) && !loading;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
@@ -99,54 +64,205 @@ export default function ForgotPasswordScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.container}>
-            {/* Header */}
-            <View style={styles.header}>
-              <Text style={styles.emoji}>🔐</Text>
-              <Text style={styles.title}>Şifreni mi Unuttun?</Text>
-              <Text style={styles.subtitle}>
-                Endişelenme! E-posta adresini gir, sana şifre sıfırlama bağlantısı gönderelim.
-              </Text>
+          {/* Top Bar */}
+          <View style={styles.topBar}>
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={styles.backButton}
+              activeOpacity={0.75}
+              accessibilityLabel="Geri dön"
+            >
+              <Ionicons name="chevron-back" size={20} color={theme.colors.text} />
+            </TouchableOpacity>
+
+            <View style={styles.pillBadge}>
+              <Text style={styles.pillBadgeText}>ŞİFRE YENİLEME</Text>
             </View>
 
-            {/* Form */}
-            <View style={styles.form}>
-              <TextInput
-                style={styles.input}
-                placeholder="E-posta"
-                placeholderTextColor={theme.colors.textLight}
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                editable={!loading}
-                autoFocus
-              />
-
-              <TouchableOpacity
-                style={[styles.button, loading && styles.buttonDisabled]}
-                onPress={handleForgotPassword}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color={theme.colors.textOnPrimary} />
-                ) : (
-                  <Text style={styles.buttonText}>Sıfırlama Bağlantısı Gönder</Text>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() => router.back()}
-                disabled={loading}
-                style={styles.linkContainer}
-              >
-                <Text style={styles.linkText}>
-                  Şifreni hatırladın mı?{' '}
-                  <Text style={styles.linkTextBold}>Giriş yap</Text>
-                </Text>
-              </TouchableOpacity>
-            </View>
+            <View style={styles.topSpacer} />
           </View>
+
+          {emailSent ? (
+            <View style={styles.stateWrap}>
+              <LinearGradient
+                colors={
+                  theme.isDark ? ['#1D2E2A', '#171C24'] : ['#ECFDF5', '#F5F3FF']
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.heroCard}
+              >
+                <View style={styles.successHalo}>
+                  <Ionicons
+                    name="mail-open-outline"
+                    size={34}
+                    color={theme.colors.success}
+                  />
+                </View>
+                <Text style={styles.title}>E-posta Gönderildi</Text>
+                <Text style={styles.subtitle}>
+                  <Text style={styles.emailHighlight}>{email.trim()}</Text> adresine
+                  kayıtlı bir hesap varsa, şifre sıfırlama bağlantısı birkaç
+                  dakika içinde ulaşacaktır.
+                </Text>
+              </LinearGradient>
+
+              <View style={styles.hintCard}>
+                <Ionicons
+                  name="information-circle-outline"
+                  size={18}
+                  color={theme.colors.primary}
+                />
+                <Text style={styles.hintText}>
+                  E-postayı gelen kutusunda göremiyorsan spam veya gereksiz
+                  klasörünü kontrol etmeyi unutma.
+                </Text>
+              </View>
+
+              <View style={styles.ctaSection}>
+                <TouchableOpacity
+                  activeOpacity={0.88}
+                  onPress={() => router.back()}
+                  style={styles.ctaWrap}
+                >
+                  <LinearGradient
+                    colors={['#EC4899', '#9333EA']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.ctaGradient}
+                  >
+                    <Text style={styles.ctaText}>Giriş Sayfasına Dön</Text>
+                    <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    setEmailSent(false);
+                    setEmail('');
+                  }}
+                  style={styles.secondaryLinkRow}
+                >
+                  <Text style={styles.secondaryLinkText}>
+                    E-postayı almadın mı?{' '}
+                    <Text style={styles.secondaryLinkBold}>Tekrar gönder</Text>
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.stateWrap}>
+              <LinearGradient
+                colors={
+                  theme.isDark ? ['#2A1836', '#1B1429'] : ['#FFF0F7', '#F5EEFF']
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.heroCard}
+              >
+                <View style={styles.iconHalo}>
+                  <Ionicons
+                    name="key-outline"
+                    size={32}
+                    color={theme.colors.primary}
+                  />
+                </View>
+                <Text style={styles.title}>Şifreni mi Unuttun?</Text>
+                <Text style={styles.subtitle}>
+                  Endişelenme. Kayıtlı e-posta adresini gir, sana güvenli bir
+                  şifre sıfırlama bağlantısı gönderelim.
+                </Text>
+              </LinearGradient>
+
+              <View style={styles.formCard}>
+                <Text style={styles.label}>E-posta Adresi</Text>
+                <View
+                  style={[
+                    styles.inputShell,
+                    focused && styles.inputShellFocused,
+                  ]}
+                >
+                  <Ionicons
+                    name="mail-outline"
+                    size={18}
+                    color={
+                      focused ? theme.colors.primary : theme.colors.textLight
+                    }
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="ornek@email.com"
+                    placeholderTextColor={theme.colors.textLight}
+                    value={email}
+                    onChangeText={setEmail}
+                    onFocus={() => setFocused(true)}
+                    onBlur={() => setFocused(false)}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="email-address"
+                    editable={!loading}
+                    returnKeyType="send"
+                    onSubmitEditing={handleForgotPassword}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.ctaSection}>
+                <TouchableOpacity
+                  activeOpacity={0.88}
+                  onPress={handleForgotPassword}
+                  disabled={!canSubmit}
+                  style={[styles.ctaWrap, !canSubmit && styles.ctaWrapDisabled]}
+                >
+                  <LinearGradient
+                    colors={
+                      canSubmit
+                        ? ['#EC4899', '#9333EA']
+                        : theme.isDark
+                        ? ['#2B2B30', '#2B2B30']
+                        : ['#E5E7EB', '#E5E7EB']
+                    }
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.ctaGradient}
+                  >
+                    {loading ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Text
+                          style={[
+                            styles.ctaText,
+                            !canSubmit && styles.ctaTextDisabled,
+                          ]}
+                        >
+                          Sıfırlama Bağlantısı Gönder
+                        </Text>
+                        <Ionicons
+                          name="send-outline"
+                          size={17}
+                          color={
+                            canSubmit ? '#FFFFFF' : theme.colors.textLight
+                          }
+                        />
+                      </>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => router.back()}
+                  disabled={loading}
+                  style={styles.secondaryLinkRow}
+                >
+                  <Text style={styles.secondaryLinkText}>
+                    Şifreni hatırladın mı?{' '}
+                    <Text style={styles.secondaryLinkBold}>Giriş yap</Text>
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -164,113 +280,186 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     },
     scrollContent: {
       flexGrow: 1,
+      paddingHorizontal: 20,
+      paddingTop: 10,
+      paddingBottom: 24,
+      gap: 16,
     },
-    container: {
-      flex: 1,
-      paddingHorizontal: theme.spacing.lg,
-      paddingVertical: theme.spacing.xl,
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    backButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 14,
+      backgroundColor: theme.colors.backgroundCard,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      alignItems: 'center',
       justifyContent: 'center',
     },
-    header: {
-      alignItems: 'center',
-      marginBottom: theme.spacing.xxl,
+    pillBadge: {
+      paddingHorizontal: 14,
+      paddingVertical: 6,
+      borderRadius: 20,
+      backgroundColor: theme.colors.backgroundCard,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
     },
-    emoji: {
-      fontSize: 64,
-      marginBottom: theme.spacing.md,
+    pillBadgeText: {
+      fontSize: 11,
+      fontWeight: '800',
+      letterSpacing: 0.8,
+      color: theme.colors.primary,
+    },
+    topSpacer: {
+      width: 40,
+    },
+    stateWrap: {
+      flex: 1,
+      justifyContent: 'center',
+      gap: 16,
+    },
+    heroCard: {
+      borderRadius: 26,
+      paddingVertical: 26,
+      paddingHorizontal: 20,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    iconHalo: {
+      width: 74,
+      height: 74,
+      borderRadius: 26,
+      backgroundColor: theme.colors.backgroundCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 14,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    successHalo: {
+      width: 74,
+      height: 74,
+      borderRadius: 26,
+      backgroundColor: theme.colors.backgroundCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 14,
+      borderWidth: 1,
+      borderColor: 'rgba(16, 185, 129, 0.35)',
     },
     title: {
-      ...theme.typography.title,
+      fontSize: 24,
+      fontWeight: '800',
       color: theme.colors.text,
-      marginBottom: theme.spacing.sm,
       textAlign: 'center',
+      marginBottom: 8,
     },
     subtitle: {
-      ...theme.typography.body,
+      fontSize: 14,
       color: theme.colors.textSecondary,
       textAlign: 'center',
-      paddingHorizontal: theme.spacing.lg,
-      lineHeight: 24,
+      lineHeight: 20,
     },
-    form: {
-      width: '100%',
+    emailHighlight: {
+      color: theme.colors.text,
+      fontWeight: '700',
+    },
+    formCard: {
+      backgroundColor: theme.colors.backgroundCard,
+      borderRadius: 22,
+      padding: 18,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      gap: 8,
+    },
+    label: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    inputShell: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: theme.isDark ? '#121215' : '#F9FAFB',
+      borderWidth: 1.5,
+      borderColor: theme.colors.border,
+      borderRadius: 15,
+      paddingHorizontal: 13,
+      minHeight: 52,
+    },
+    inputShellFocused: {
+      borderColor: theme.colors.primary,
+      backgroundColor: theme.colors.backgroundCard,
     },
     input: {
-      backgroundColor: theme.colors.backgroundCard,
-      borderWidth: 2,
-      borderColor: theme.colors.border,
-      borderRadius: theme.button.borderRadius,
-      padding: theme.spacing.md,
-      marginBottom: theme.spacing.lg,
-      fontSize: 16,
+      flex: 1,
+      fontSize: 15,
       color: theme.colors.text,
-      shadowColor: theme.card.shadowColor,
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.05,
-      shadowRadius: 4,
-      elevation: 2,
+      paddingVertical: 12,
     },
-    button: {
-      backgroundColor: theme.colors.primary,
-      borderRadius: theme.button.borderRadius,
-      padding: theme.button.padding,
+    hintCard: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+      backgroundColor: theme.colors.backgroundCard,
+      borderRadius: 16,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    hintText: {
+      flex: 1,
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      lineHeight: 19,
+    },
+    ctaSection: {
+      gap: 12,
+    },
+    ctaWrap: {
+      borderRadius: 18,
+      overflow: 'hidden',
+      shadowColor: theme.colors.primary,
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.25,
+      shadowRadius: 12,
+      elevation: 6,
+    },
+    ctaWrapDisabled: {
+      shadowOpacity: 0,
+      elevation: 0,
+    },
+    ctaGradient: {
+      height: 56,
+      flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: theme.spacing.lg,
-      shadowColor: theme.button.shadowColor,
-      shadowOffset: theme.button.shadowOffset,
-      shadowOpacity: theme.button.shadowOpacity,
-      shadowRadius: theme.button.shadowRadius,
-      elevation: theme.button.elevation,
+      justifyContent: 'center',
+      gap: 8,
     },
-    buttonDisabled: {
-      opacity: 0.6,
-    },
-    buttonText: {
-      color: theme.colors.textOnPrimary,
+    ctaText: {
+      color: '#FFFFFF',
       fontSize: 16,
-      fontWeight: '700',
-      letterSpacing: 0.5,
+      fontWeight: '800',
     },
-    linkContainer: {
+    ctaTextDisabled: {
+      color: theme.colors.textLight,
+    },
+    secondaryLinkRow: {
       alignItems: 'center',
-      paddingVertical: theme.spacing.sm,
+      paddingVertical: 6,
     },
-    linkText: {
+    secondaryLinkText: {
       fontSize: 14,
       color: theme.colors.textSecondary,
-      textAlign: 'center',
     },
-    linkTextBold: {
+    secondaryLinkBold: {
       color: theme.colors.primary,
       fontWeight: '700',
-    },
-    successContainer: {
-      alignItems: 'center',
-    },
-    successEmoji: {
-      fontSize: 80,
-      marginBottom: theme.spacing.lg,
-    },
-    successTitle: {
-      ...theme.typography.title,
-      color: theme.colors.text,
-      marginBottom: theme.spacing.md,
-      textAlign: 'center',
-    },
-    successMessage: {
-      ...theme.typography.body,
-      color: theme.colors.textSecondary,
-      textAlign: 'center',
-      paddingHorizontal: theme.spacing.md,
-      lineHeight: 24,
-      marginBottom: theme.spacing.lg,
-    },
-    successHint: {
-      fontSize: 14,
-      color: theme.colors.textLight,
-      textAlign: 'center',
-      paddingHorizontal: theme.spacing.lg,
-      marginBottom: theme.spacing.xxl,
-      fontStyle: 'italic',
     },
   });

@@ -18,7 +18,7 @@ export function useNetworkStatus() {
         // Get initial network state
         NetInfo.fetch().then((state: NetInfoState) => {
             setNetworkStatus({
-                isConnected: state.isConnected ?? false,
+                isConnected: state.isConnected !== false,
                 isInternetReachable: state.isInternetReachable,
                 type: state.type,
             });
@@ -27,7 +27,7 @@ export function useNetworkStatus() {
         // Subscribe to network state updates
         const unsubscribe = NetInfo.addEventListener((state: NetInfoState) => {
             setNetworkStatus({
-                isConnected: state.isConnected ?? false,
+                isConnected: state.isConnected !== false,
                 isInternetReachable: state.isInternetReachable,
                 type: state.type,
             });

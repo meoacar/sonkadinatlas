@@ -1,11 +1,12 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useState, useCallback } from 'react';
 import { useAuthStore } from '@/store/authStore';
-import { homeService, discoverService } from '@/services/api';
+import { homeService, discoverService, userService } from '@/services/api';
 import { useTheme } from '@/hooks/useTheme';
 import { StreakChip } from '@/components/home/StreakChip';
 import { StatusPill } from '@/components/home/StatusPill';
@@ -17,7 +18,12 @@ import { PremiumFeatureGate } from '@/components/premium/PremiumFeatureGate';
 import { FEATURES } from '@/types/subscription';
 import { PremiumBadge } from '@/components/premium/PremiumBadge';
 import { GamificationCard } from '@/components/home/GamificationCard';
+import { DailyHabitSection } from '@/components/home/DailyHabitSection';
+import { CycleWheelHero } from '@/components/home/CycleWheelHero';
+import { WinbackOfferBanner } from '@/components/home/WinbackOfferBanner';
 import { FunNotificationExample } from '@/components/notifications';
+import { useFeatureFlags } from '@/hooks/useFeatureFlags';
+import { resolveAvatarSource } from '@/utils/avatar';
 
 export default function HomeScreen() {
   // CRITICAL: ALL HOOKS MUST BE CALLED BEFORE ANY CONDITIONAL RETURNS
@@ -29,9 +35,18 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   // Track in-session dismissed cards (resets on app restart)
   const [sessionDismissedCards, setSessionDismissedCards] = useState<Set<string>>(new Set());
+  const [maintenanceDismissed, setMaintenanceDismissed] = useState(false);
 
   // Premium access
   const { isPremium, canUseFeature } = usePremium();
+  const { flags } = useFeatureFlags();
+
+  const { data: retentionOffer } = useQuery({
+    queryKey: ['retentionOffer'],
+    queryFn: () => userService.getRetentionOffer(),
+    enabled: isAuthenticated,
+    staleTime: 60 * 1000,
+  });
 
   const {
     data: snapshot,
@@ -146,7 +161,7 @@ export default function HomeScreen() {
             {snapshot?.user.profilePictureUrl ? (
               <View style={styles.profileImageContainer}>
                 <Image
-                  source={{ uri: snapshot.user.profilePictureUrl }}
+                  source={resolveAvatarSource(snapshot.user.profilePictureUrl)!}
                   style={styles.profileImage}
                 />
                 {isPremium && (
@@ -221,6 +236,65 @@ export default function HomeScreen() {
           </LinearGradient>
         </View>
 
+        {/* Admin Controlled Maintenance Banner */}
+        {flags.maintenance_mode && !maintenanceDismissed && (
+          <View style={styles.maintenanceWrapper}>
+            <LinearGradient
+              colors={
+                theme.isDark
+                  ? (['rgba(120, 53, 15, 0.92)', 'rgba(69, 26, 3, 0.95)'] as const)
+                  : (['#FFFBEB', '#FEF3C7'] as const)
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.maintenanceCard}
+            >
+              <View style={styles.maintenanceIconBox}>
+                <Ionicons name="construct" size={20} color="#D97706" />
+              </View>
+
+              <View style={styles.maintenanceBody}>
+                <View style={styles.maintenanceBadgeRow}>
+                  <View style={styles.maintenancePill}>
+                    <View style={styles.maintenanceDot} />
+                    <Text style={styles.maintenancePillText}>PLANLI BAKIM</Text>
+                  </View>
+                </View>
+                <Text style={styles.maintenanceTitle}>Sistem İyileştirmesi Yapılıyor</Text>
+                <Text style={styles.maintenanceDesc}>
+                  Size daha hızlı ve akıcı bir deneyim sunmak için kısa süreli güncelleme çalışması sürüyor.
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => setMaintenanceDismissed(true)}
+                style={styles.maintenanceCloseBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons
+                  name="close"
+                  size={16}
+                  color={theme.isDark ? '#FDE68A' : '#92400E'}
+                />
+              </TouchableOpacity>
+            </LinearGradient>
+          </View>
+        )}
+
+        {/* Personalized Retention / Win-Back Return Banner */}
+        {retentionOffer?.banner && (
+          <WinbackOfferBanner banner={retentionOffer.banner} />
+        )}
+
+        {/* Interactive Cycle Wheel + 1-Tap Check-In */}
+        <CycleWheelHero
+          cycleDay={snapshot?.todaySnapshot?.cycleDay}
+          cyclePhase={snapshot?.todaySnapshot?.cyclePhase}
+          nextPeriodEstimate={snapshot?.todaySnapshot?.nextPeriodEstimate}
+          isAuthenticated={isAuthenticated}
+          isPregnant={Boolean(snapshot?.todaySnapshot?.pregnancy)}
+        />
+
         {/* Streak Chip */}
         {snapshot?.streak != null && (
           <View style={styles.streakContainer}>
@@ -235,15 +309,84 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {/* Premium Advantages Discovery Card (Free Users Only) */}
+        {isAuthenticated && !isPremium && (
+          <TouchableOpacity
+            style={{ marginHorizontal: theme.spacing.lg, marginBottom: theme.spacing.md }}
+            activeOpacity={0.88}
+            onPress={() => router.push('/premium' as any)}
+          >
+            <LinearGradient
+              colors={
+                theme.isDark
+                  ? (['#4C1D95', '#831843'] as const)
+                  : (['#FDF2F8', '#F5F3FF'] as const)
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={{
+                borderRadius: 18,
+                padding: 14,
+                borderWidth: 1,
+                borderColor: theme.isDark ? 'rgba(236, 72, 153, 0.35)' : '#FBCFE8',
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
+              <View
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 12,
+                  backgroundColor: '#FEF3C7',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text style={{ fontSize: 18 }}>👑</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontSize: 13.5,
+                    fontWeight: '800',
+                    color: theme.isDark ? '#FDF2F8' : '#831843',
+                  }}
+                >
+                  Premium Ayrıcalıklarını Keşfet
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 11.5,
+                    color: theme.isDark ? '#E9D5FF' : '#6B7280',
+                    marginTop: 2,
+                  }}
+                >
+                  3 Aylık Tahmin · Klinik Rapor · Partner Modu · 7 Gün Ücretsiz
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#DB2777" />
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+
         {/* Fun Notifications - Streak'in hemen altında */}
         {snapshot?.streak && (
           <FunNotificationExample
             streakDay={snapshot.streak.current}
-            dataEntryCount={snapshot.todaySnapshot.dataEntriesCount || 0}
+            dataEntryCount={snapshot.todaySnapshot?.dataEntriesCount || (snapshot.todaySnapshot?.waterProgress?.current ? 1 : 0)}
+            cycleDay={snapshot.todaySnapshot.cycleDay}
             isPeriodWeek={snapshot.todaySnapshot.cycleDay ? snapshot.todaySnapshot.cycleDay >= 1 && snapshot.todaySnapshot.cycleDay <= 7 : false}
             autoShow={true}
           />
         )}
+
+        {/* Habit Loop: 5-Second Check-in, Daily 3 Mini Tasks, Cycle Phase Guidance */}
+        <DailyHabitSection
+          cyclePhase={snapshot?.todaySnapshot?.cyclePhase}
+          isAuthenticated={isAuthenticated}
+        />
 
         {/* Zone B: Today at a Glance (Status Pills) */}
         {(() => {
@@ -388,25 +531,27 @@ export default function HomeScreen() {
             </TouchableOpacity>
 
             {/* Astroloji Card */}
-            <TouchableOpacity
-              style={styles.discoverSquareCard}
-              onPress={() => {
-                // Navigate to astrology section
-                router.push('/astrology');
-              }}
-              activeOpacity={0.85}
-            >
-              <LinearGradient
-                colors={['#C4B5FD', '#A78BFA']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.discoverSquareCardGradient}
+            {flags.astrology_enabled !== false && (
+              <TouchableOpacity
+                style={styles.discoverSquareCard}
+                onPress={() => {
+                  // Navigate to astrology section
+                  router.push('/astrology');
+                }}
+                activeOpacity={0.85}
               >
-                <Text style={styles.discoverSquareCardIcon}>✨</Text>
-                <Text style={styles.discoverSquareCardTitle}>Astroloji</Text>
-                <Text style={styles.discoverSquareCardSubtitle}>Burç yorumları</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+                <LinearGradient
+                  colors={['#C4B5FD', '#A78BFA']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.discoverSquareCardGradient}
+                >
+                  <Text style={styles.discoverSquareCardIcon}>✨</Text>
+                  <Text style={styles.discoverSquareCardTitle}>Astroloji</Text>
+                  <Text style={styles.discoverSquareCardSubtitle}>Burç yorumları</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 
@@ -703,10 +848,6 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       color: 'rgba(255, 255, 255, 0.9)',
       textAlign: 'center',
     },
-    sectionHeader: {
-      paddingHorizontal: theme.spacing.lg,
-      marginBottom: theme.spacing.md,
-    },
     sectionTitle: {
       fontSize: 20,
       fontWeight: '700',
@@ -801,6 +942,86 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     },
     tileWrapper: {
       flex: 1,
+    },
+    maintenanceWrapper: {
+      marginHorizontal: theme.spacing.lg,
+      marginBottom: theme.spacing.md,
+      borderRadius: 20,
+      shadowColor: '#D97706',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.12,
+      shadowRadius: 10,
+      elevation: 4,
+    },
+    maintenanceCard: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 12,
+      padding: 14,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: theme.isDark ? 'rgba(245, 158, 11, 0.45)' : 'rgba(245, 158, 11, 0.4)',
+    },
+    maintenanceIconBox: {
+      width: 40,
+      height: 40,
+      borderRadius: 14,
+      backgroundColor: theme.isDark ? 'rgba(245, 158, 11, 0.2)' : '#FFFFFF',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#D97706',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+      elevation: 2,
+    },
+    maintenanceBody: {
+      flex: 1,
+      gap: 3,
+    },
+    maintenanceBadgeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 2,
+    },
+    maintenancePill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      backgroundColor: theme.isDark ? 'rgba(245, 158, 11, 0.25)' : 'rgba(217, 119, 6, 0.14)',
+      paddingHorizontal: 8,
+      paddingVertical: 2.5,
+      borderRadius: 999,
+    },
+    maintenanceDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: '#F59E0B',
+    },
+    maintenancePillText: {
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.6,
+      color: theme.isDark ? '#FCD34D' : '#B45309',
+    },
+    maintenanceTitle: {
+      fontSize: 14.5,
+      fontWeight: '800',
+      color: theme.isDark ? '#FEF3C7' : '#78350F',
+    },
+    maintenanceDesc: {
+      fontSize: 12.5,
+      lineHeight: 17.5,
+      color: theme.isDark ? '#FDE68A' : '#92400E',
+    },
+    maintenanceCloseBtn: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      backgroundColor: theme.isDark ? 'rgba(255,255,255,0.1)' : 'rgba(180, 83, 9, 0.08)',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     bottomSpacer: {
       height: 40,

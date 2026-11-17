@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { remindersService } from '../services/api';
@@ -10,6 +11,8 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
@@ -151,7 +154,7 @@ export function useNotifications() {
     }
   }
 
-  // Schedule a local notification (for testing or offline reminders)
+  // Schedule a local notification (respects Quiet Hours 23:00-08:00 when enabled, unless test: true)
   async function scheduleLocalNotification(
     title: string,
     body: string,
@@ -159,6 +162,16 @@ export function useNotifications() {
     trigger?: Notifications.NotificationTriggerInput
   ) {
     try {
+      if (!data?.test) {
+        const quietEnabled = await AsyncStorage.getItem('@quiet_hours_enabled');
+        if (quietEnabled === 'true') {
+          const hour = new Date().getHours();
+          if (hour >= 23 || hour < 8) {
+            return null;
+          }
+        }
+      }
+
       const id = await Notifications.scheduleNotificationAsync({
         content: {
           title,

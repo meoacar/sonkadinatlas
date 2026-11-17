@@ -12,10 +12,8 @@ import {
     ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
-import axios from 'axios';
 import { Line, Column, Pie } from '@ant-design/charts';
-
-const API_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+import { apiClient } from '@/providers/dataProvider';
 
 export default function FinancialDashboardPage() {
     const [loading, setLoading] = useState(true);
@@ -35,9 +33,6 @@ export default function FinancialDashboardPage() {
     const fetchFinancialData = async () => {
         setLoading(true);
         try {
-            const token = localStorage.getItem('accessToken');
-            const headers = { Authorization: `Bearer ${token}` };
-
             const [
                 mrrRes,
                 churnRes,
@@ -47,13 +42,13 @@ export default function FinancialDashboardPage() {
                 tierRes,
                 forecastRes,
             ] = await Promise.allSettled([
-                axios.get(`${API_URL}/subscription/financial-analytics/mrr`, { headers }),
-                axios.get(`${API_URL}/subscription/financial-analytics/churn-rate`, { headers, params: { days } }),
-                axios.get(`${API_URL}/subscription/financial-analytics/metrics`, { headers, params: { days } }),
-                axios.get(`${API_URL}/subscription/financial-analytics/revenue-over-time`, { headers, params: { days } }),
-                axios.get(`${API_URL}/subscription/financial-analytics/payment-providers`, { headers, params: { days } }),
-                axios.get(`${API_URL}/subscription/financial-analytics/tier-breakdown`, { headers }),
-                axios.get(`${API_URL}/subscription/financial-analytics/forecast`, { headers }),
+                apiClient.get('/subscription/financial-analytics/mrr'),
+                apiClient.get('/subscription/financial-analytics/churn-rate', { params: { days } }),
+                apiClient.get('/subscription/financial-analytics/metrics', { params: { days } }),
+                apiClient.get('/subscription/financial-analytics/revenue-over-time', { params: { days } }),
+                apiClient.get('/subscription/financial-analytics/payment-providers', { params: { days } }),
+                apiClient.get('/subscription/financial-analytics/tier-breakdown'),
+                apiClient.get('/subscription/financial-analytics/forecast'),
             ]);
 
             if (mrrRes.status === 'fulfilled') setMrr(mrrRes.value.data);
@@ -74,15 +69,18 @@ export default function FinancialDashboardPage() {
         data: revenueOverTime,
         xField: 'date',
         yField: 'revenue',
-        smooth: true,
-        color: '#52c41a',
-        point: {
-            size: 3,
-            shape: 'circle',
+        shapeField: 'smooth',
+        style: {
+            stroke: '#52c41a',
+            lineWidth: 2,
         },
-        yAxis: {
-            label: {
-                formatter: (v: string) => `₺${v}`,
+        point: {
+            sizeField: 3,
+            shapeField: 'circle',
+        },
+        axis: {
+            y: {
+                labelFormatter: (v: any) => `₺${v}`,
             },
         },
     };
@@ -93,8 +91,8 @@ export default function FinancialDashboardPage() {
         colorField: 'provider',
         radius: 0.8,
         label: {
-            type: 'outer',
-            content: '{name} ₺{value}',
+            text: (d: any) => `${d.provider || ''}: ₺${d.revenue ?? 0}`,
+            position: 'outside',
         },
     };
 
@@ -102,10 +100,11 @@ export default function FinancialDashboardPage() {
         data: tierBreakdown,
         xField: 'tier',
         yField: 'count',
-        seriesField: 'status',
-        isGroup: true,
-        columnStyle: {
-            radius: [8, 8, 0, 0],
+        colorField: 'status',
+        group: true,
+        style: {
+            radiusTopLeft: 8,
+            radiusTopRight: 8,
         },
     };
 

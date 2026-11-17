@@ -72,12 +72,12 @@ export function PopularQuestionsWidget({
             )}
 
             <View style={styles.questionsContainer}>
-                {data.questions.map((question, index) => (
+                {(data?.questions || []).map((question, index, arr) => (
                     <TouchableOpacity
                         key={question.id}
                         style={[
                             styles.questionItem,
-                            index !== data.questions.length - 1 && styles.questionItemBorder,
+                            index !== arr.length - 1 && styles.questionItemBorder,
                         ]}
                         onPress={() => router.push(`/community/${question.id}`)}
                     >
